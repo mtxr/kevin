@@ -49,9 +49,9 @@ fn familyOf(k: Kind) Family {
     };
 }
 
-/// Drops non-executable blocks; when both POSIX-shell and Windows-shell
-/// blocks exist, keeps only the family matching `os`. Order is preserved.
-pub fn selectBlocks(arena: Allocator, blocks: []const CodeBlock, os: std.Target.Os.Tag) Allocator.Error![]const CodeBlock {
+/// When both POSIX-shell and Windows-shell blocks exist, returns the family
+/// that does not belong to `os` and must be dropped.
+fn familyToDrop(blocks: []const CodeBlock, os: std.Target.Os.Tag) ?Family {
     var has_posix = false;
     var has_win = false;
     for (blocks) |b| {
@@ -62,11 +62,14 @@ pub fn selectBlocks(arena: Allocator, blocks: []const CodeBlock, os: std.Target.
             .other => {},
         }
     }
-    const drop: ?Family = if (has_posix and has_win)
-        (if (os == .windows) Family.posix_shell else Family.win_shell)
-    else
-        null;
+    if (!(has_posix and has_win)) return null;
+    return if (os == .windows) Family.posix_shell else Family.win_shell;
+}
 
+/// Drops non-executable blocks; when both POSIX-shell and Windows-shell
+/// blocks exist, keeps only the family matching `os`. Order is preserved.
+pub fn selectBlocks(arena: Allocator, blocks: []const CodeBlock, os: std.Target.Os.Tag) Allocator.Error![]const CodeBlock {
+    const drop = familyToDrop(blocks, os);
     var out: std.ArrayList(CodeBlock) = .empty;
     for (blocks) |b| {
         const k = kindOf(b.lang) orelse continue;
@@ -153,7 +156,78 @@ fn exitCode(term: std.process.Child.Term) u8 {
     };
 }
 
-/// Runs every selected block of `cmd` in order; stops at the first failure
+pub const Status = enum {
+    /// Will be executed with `launch`.
+    run,
+    /// Not executed; see `reason`.
+    skipped,
+    /// Executable block but none of the candidate runtimes is in PATH.
+    no_runtime,
+};
+
+pub const Step = struct {
+    block: CodeBlock,
+    status: Status,
+    reason: []const u8 = "",
+    /// Runtime executables looked up in PATH, in order.
+    tried: []const []const u8 = &.{},
+    launch: ?Launch = null,
+};
+
+/// Decides, for every block of `cmd`, what would happen, without running anything.
+pub fn planFor(
+    arena: Allocator,
+    io: Io,
+    cmd: *const Command,
+    env: *const std.process.Environ.Map,
+    os: std.Target.Os.Tag,
+) Allocator.Error![]const Step {
+    const drop = familyToDrop(cmd.blocks.items, os);
+    var steps: std.ArrayList(Step) = .empty;
+    for (cmd.blocks.items) |b| {
+        const kind = kindOf(b.lang) orelse {
+            const reason = if (b.lang.len == 0)
+                "no language"
+            else
+                try std.fmt.allocPrint(arena, "'{s}' is not an executable language", .{b.lang});
+            try steps.append(arena, .{ .block = b, .status = .skipped, .reason = reason });
+            continue;
+        };
+        if (drop != null and familyOf(kind) == drop.?) {
+            const reason = try std.fmt.allocPrint(arena, "shell family of another OS (current OS: {t})", .{os});
+            try steps.append(arena, .{ .block = b, .status = .skipped, .reason = reason });
+            continue;
+        }
+        const cands = try candidates(arena, kind, b.code);
+        var tried: std.ArrayList([]const u8) = .empty;
+        var chosen: ?Launch = null;
+        for (cands) |c| {
+            try tried.append(arena, c.argv[0]);
+            if (inPath(arena, io, env, c.argv[0])) {
+                chosen = c;
+                break;
+            }
+        }
+        try steps.append(arena, .{
+            .block = b,
+            .status = if (chosen != null) .run else .no_runtime,
+            .tried = tried.items,
+            .launch = chosen,
+        });
+    }
+    return steps.items;
+}
+
+pub fn plan(
+    arena: Allocator,
+    io: Io,
+    cmd: *const Command,
+    env: *const std.process.Environ.Map,
+) Allocator.Error![]const Step {
+    return planFor(arena, io, cmd, env, builtin.os.tag);
+}
+
+/// Runs every block of `cmd` in order; stops at the first failure
 /// and returns its exit code.
 pub fn runCommand(
     arena: Allocator,
@@ -162,27 +236,30 @@ pub fn runCommand(
     env: *const std.process.Environ.Map,
     verbose: bool,
 ) Allocator.Error!u8 {
-    const blocks = try selectBlocks(arena, cmd.blocks.items, builtin.os.tag);
-    if (blocks.len == 0) {
+    const steps = try plan(arena, io, cmd, env);
+
+    var runnable: usize = 0;
+    for (steps) |st| {
+        switch (st.status) {
+            .run => runnable += 1,
+            .no_runtime => {
+                std.debug.print("kevin: no runtime found in PATH for '{s}' (tried: ", .{st.block.lang});
+                for (st.tried, 0..) |t, i| std.debug.print("{s}{s}", .{ if (i > 0) ", " else "", t });
+                std.debug.print(")\n", .{});
+                return 127;
+            },
+            .skipped => {},
+        }
+    }
+    if (runnable == 0) {
         std.debug.print("kevin: command '{s}' has no runnable code block for this OS\n", .{cmd.name});
         return 1;
     }
-    for (blocks) |b| {
-        const kind = kindOf(b.lang).?;
-        const cands = try candidates(arena, kind, b.code);
-        var chosen: ?Launch = null;
-        for (cands) |c| {
-            if (inPath(arena, io, env, c.argv[0])) {
-                chosen = c;
-                break;
-            }
-        }
-        const launch = chosen orelse {
-            std.debug.print("kevin: no runtime found in PATH for '{s}' (tried: ", .{b.lang});
-            for (cands, 0..) |c, i| std.debug.print("{s}{s}", .{ if (i > 0) ", " else "", c.argv[0] });
-            std.debug.print(")\n", .{});
-            return 127;
-        };
+
+    for (steps) |st| {
+        if (st.status != .run) continue;
+        const b = st.block;
+        const launch = st.launch.?;
 
         if (verbose) {
             std.debug.print("+ [{s}] {s}:{d}\n{s}", .{ b.lang, cmd.source_path, b.line, b.code });
@@ -277,4 +354,34 @@ test "runtime candidates and fallbacks" {
     try testing.expectEqualStrings("bun", ts[0].argv[0]);
     try testing.expectEqualStrings("1", ts[0].stdin.?);
     try testing.expectEqualStrings("tsx", ts[1].argv[0]);
+}
+
+test "plan explains skipped blocks and missing runtimes" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var cmd: Command = .{ .name = "demo" };
+    try cmd.blocks.append(arena, blk("json", "{}"));
+    try cmd.blocks.append(arena, blk("bash", "echo posix"));
+    try cmd.blocks.append(arena, blk("powershell", "Write-Host win"));
+    try cmd.blocks.append(arena, blk("", "plain"));
+
+    var env = std.process.Environ.Map.init(arena); // empty PATH: no runtime can be found
+    const steps = try planFor(arena, testing.io, &cmd, &env, .linux);
+    try testing.expectEqual(@as(usize, 4), steps.len);
+    try testing.expectEqual(Status.skipped, steps[0].status);
+    try testing.expect(std.mem.indexOf(u8, steps[0].reason, "'json'") != null);
+    try testing.expectEqual(Status.no_runtime, steps[1].status);
+    try testing.expectEqualStrings("bash", steps[1].tried[0]);
+    try testing.expectEqual(Status.skipped, steps[2].status);
+    try testing.expect(std.mem.indexOf(u8, steps[2].reason, "linux") != null);
+    try testing.expectEqualStrings("no language", steps[3].reason);
+
+    try env.put("PATH", "/bin:/usr/bin");
+    const with_path = try planFor(arena, testing.io, &cmd, &env, .linux);
+    if (builtin.os.tag != .windows) {
+        try testing.expectEqual(Status.run, with_path[1].status);
+        try testing.expectEqualStrings("-c", with_path[1].launch.?.argv[1]);
+    }
 }

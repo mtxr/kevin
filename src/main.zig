@@ -6,6 +6,7 @@ const parser = @import("parser.zig");
 const cli = @import("cli.zig");
 const runner = @import("runner.zig");
 const migrate = @import("migrate.zig");
+const explain = @import("explain.zig");
 const build_options = @import("build_options");
 
 test {
@@ -14,6 +15,7 @@ test {
     _ = cli;
     _ = runner;
     _ = migrate;
+    _ = explain;
 }
 
 const default_files = [_][]const u8{ "readme.md", "tasks.md", "build.md" };
@@ -56,6 +58,7 @@ pub fn main(init: std.process.Init) !u8 {
     var file_arg: ?[]const u8 = null;
     var from_arg: ?[]const u8 = null;
     var output_arg: ?[]const u8 = null;
+    var explain_flag = false;
     var tokens: std.ArrayList([]const u8) = .empty;
     var i: usize = 1;
     while (i < argv.len) : (i += 1) {
@@ -72,6 +75,8 @@ pub fn main(init: std.process.Init) !u8 {
             try w.interface.print("kevin {s}\n", .{build_options.version});
             try w.interface.flush();
             return 0;
+        } else if (std.mem.eql(u8, a, "--explain")) {
+            explain_flag = true;
         } else if (std.mem.eql(u8, a, "--from")) {
             i += 1;
             if (i >= argv.len) return fail("--from requires 'mask' or 'xc'", .{});
@@ -142,8 +147,11 @@ pub fn main(init: std.process.Init) !u8 {
             }
         }
     }
+    var usage_error: ?[]const u8 = null;
     const inv = cli.parseInvocation(arena, resolved.cmd, resolved.rest, &msg) catch |err| switch (err) {
-        error.Usage => {
+        error.Usage => blk: {
+            usage_error = msg;
+            if (explain_flag) break :blk cli.Invocation{};
             std.debug.print("kevin: {s}\n", .{msg});
             if (resolved.cmd != root and resolved.cmd.blocks.items.len == 0 and resolved.cmd.children.items.len > 0) {
                 std.debug.print("Run 'kevin {s} --help' to list subcommands.\n", .{try std.mem.join(arena, " ", resolved.path)});
@@ -161,7 +169,7 @@ pub fn main(init: std.process.Init) !u8 {
     const is_root = resolved.cmd == root;
     const no_code = resolved.cmd.blocks.items.len == 0;
     // A namespace (or the root) with nothing runnable prints help; a bad name is an error.
-    if (inv.help or is_root or no_code) {
+    if (!explain_flag and (inv.help or is_root or no_code)) {
         if (is_root) {
             try cli.printRootHelp(arena, out, root, sources.items);
         } else {
@@ -171,16 +179,39 @@ pub fn main(init: std.process.Init) !u8 {
         return if (inv.help or children(resolved.cmd)) 0 else 1;
     }
 
-    // Child environment: inherited + args/flags + utilities.
-    var env = try init.environ_map.clone(arena);
-    for (inv.env) |p| try env.put(p.name, p.value);
-    const exe = try std.process.executablePathAlloc(io, arena);
+    // Variables kevin adds to the inherited environment.
     const md_path = resolved.cmd.source_path;
-    try env.put("KEVIN", try std.fmt.allocPrint(arena, "{s} --file {s}", .{ exe, md_path }));
-    try env.put("KEVIN_DIR", std.fs.path.dirname(md_path) orelse ".");
+    var injected: std.ArrayList(cli.EnvPair) = .empty;
+    try injected.appendSlice(arena, inv.env);
+    const exe = try std.process.executablePathAlloc(io, arena);
+    try injected.append(arena, .{ .name = "KEVIN", .value = try std.fmt.allocPrint(arena, "{s} --file {s}", .{ exe, md_path }) });
+    try injected.append(arena, .{ .name = "KEVIN_DIR", .value = std.fs.path.dirname(md_path) orelse "." });
     if (inv.verbose) {
-        try env.put("verbose", "true");
-        try env.put("KEVIN_VERBOSE", "true");
+        try injected.append(arena, .{ .name = "verbose", .value = "true" });
+        try injected.append(arena, .{ .name = "KEVIN_VERBOSE", .value = "true" });
+    }
+    var env = try init.environ_map.clone(arena);
+    for (injected.items) |p| try env.put(p.name, p.value);
+
+    if (explain_flag) {
+        const steps: []const runner.Step = if (usage_error == null and !is_root and !no_code and !inv.help)
+            try runner.plan(arena, io, resolved.cmd, &env)
+        else
+            &.{};
+        try explain.print(out, .{
+            .sources = sources.items,
+            .warnings = warnings.items,
+            .cmd = resolved.cmd,
+            .path = resolved.path,
+            .invocation = inv,
+            .usage_error = usage_error,
+            .injected = injected.items,
+            .steps = steps,
+        });
+        try out.flush();
+        if (usage_error != null) return 2;
+        for (steps) |st| if (st.status == .no_runtime) return 127;
+        return 0;
     }
 
     return runner.runCommand(arena, io, resolved.cmd, &env, inv.verbose);
