@@ -1,0 +1,24 @@
+# kevin
+
+> kevin is a task runner that turns Markdown files (README.md, tasks.md, build.md) into a command line interface: headings marked with `>` become commands and their code blocks become the scripts. It is a small, dependency-free alternative to make and just for project tasks, in the family of mask and xc, written in Zig. Status: early (0.x).
+
+kevin gives each command positional arguments, typed flags (number, string, boolean, choices, required), dependencies (`Requires:`, sync or async, with a job limit), several runtimes (shell, Node/Bun, TypeScript, Python, Ruby, Lua, PHP, PowerShell) and a generated `--help`. `kevin --explain <command>` previews what would run without running it, `kevin --introspect` prints the command tree as JSON, and `kevin --from mask|xc` converts existing mask or xc files.
+
+Use kevin when project tasks (test, lint, build, release, setup) should live in documentation that people and coding agents already read. Do not use it for incremental, file-timestamp builds (use make, ninja or Bazel), or when a stable 1.0 interface is required.
+
+## Docs
+
+- [README](https://raw.githubusercontent.com/mtxr/kevin/main/README.md): overview, install from the releases page, syntax, flags, dependencies, runtimes, comparison with make, just, mask and xc, known limitations
+- [Guide for coding agents](https://raw.githubusercontent.com/mtxr/kevin/main/docs/for-agents.md): how to discover, preview, run and write kevin tasks, plus a snippet for AGENTS.md or CLAUDE.md
+- [Agent skill](https://raw.githubusercontent.com/mtxr/kevin/main/skills/kevin/SKILL.md): a SKILL.md that teaches an agent the kevin syntax and workflow
+
+## Project
+
+- [build.md](https://raw.githubusercontent.com/mtxr/kevin/main/build.md): the project's own build, test and release tasks, written as kevin tasks
+- [CONTRIBUTING](https://raw.githubusercontent.com/mtxr/kevin/main/CONTRIBUTING.md): development workflow, commit conventions, CI and releases
+- [Releases](https://github.com/mtxr/kevin/releases): prebuilt binaries for Linux, macOS and Windows with SHA256SUMS
+
+## Optional
+
+- [Compatibility tests](https://github.com/mtxr/kevin/tree/main/tests/compat): mask and xc cases, with known gaps tracked as expected failures
+- [LICENSE](https://raw.githubusercontent.com/mtxr/kevin/main/LICENSE): MIT

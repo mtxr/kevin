@@ -1,12 +1,82 @@
 # kevin
 
-A task runner that turns Markdown into a CLI. Describe commands in `README.md`,
-`tasks.md` or `build.md`, and `kevin` runs the code blocks. Inspired by
-[mask](https://github.com/jacobdeichert/mask) and [xc](https://github.com/joerdav/xc),
-written in Zig with no dependencies.
+**Your README, as a task runner.** kevin turns the Markdown files you already
+write (`README.md`, `tasks.md`, `build.md`) into a CLI: headings become
+commands, code blocks become their scripts, and `kevin --help` is generated
+from the document. A small, dependency-free alternative to `make` and `just`
+for project tasks, in the family of [mask](https://github.com/jacobdeichert/mask)
+and [xc](https://github.com/joerdav/xc), written in Zig.
+
+> Status: early (0.x). The syntax and flags may still change between minor
+> versions; see [Known limitations](#known-limitations).
+
+## Why kevin
+
+- **Docs and commands in one file.** What people read is what runs, so it
+  cannot drift. Humans and coding agents use the same source of truth.
+- **Real CLI ergonomics.** Positional arguments, typed flags (`number`,
+  `string`, `boolean`, `choices`, `required`), validation before anything runs,
+  and generated `--help`.
+- **Dependencies.** `Requires:` with sync or async execution, `Run: once` and a
+  job limit (`--jobs`).
+- **Any runtime.** Shell, Node/Bun, TypeScript, Python, Ruby, Lua, PHP and
+  PowerShell blocks, several per command, with OS-specific selection.
+- **Easy to inspect.** `kevin --explain <cmd>` shows what would run without
+  running it, and `kevin --introspect` prints the command tree as JSON.
+- **Migration.** `kevin --from mask|xc` converts existing files.
+- **One small binary**, no runtime dependencies (about 0.7 MB).
+
+### How it compares
+
+- **make** is unbeatable for incremental, file-timestamp builds. kevin does not
+  track files; it is for the tasks around a project (test, lint, release),
+  with arguments, flags and documentation.
+- **just** uses its own `justfile` syntax. kevin keeps the tasks inside
+  Markdown you would write anyway.
+- **mask** is the closest relative and kevin borrows its argument and flag
+  syntax. kevin adds dependencies, several blocks per command, `--explain`,
+  inline tasks and `Requires:`; mask has swift support and a different
+  introspection format.
+- **xc** also lives in your README and has `Requires:`. kevin adds typed flags
+  and nested subcommands, and can migrate xc files.
+
+See the [compatibility table](#compatibility-with-mask-and-xc) for details.
+
+### When not to use kevin
+
+- You need incremental builds driven by file timestamps or content hashes: use
+  `make`, `ninja` or a build system such as Bazel.
+- You need a stable 1.0 interface today: kevin is 0.x.
+- You mainly target Windows: it builds there, but task execution has not been
+  exercised on Windows yet.
+- Your scripts rely on `$1`/`$@` positional parameters (xc style): kevin passes
+  arguments as named environment variables.
+
+## Get started
+
+Create `tasks.md` (or put this in your `README.md`):
+
+````md
+## > hello (name)
+> Say hello
+
+```sh
+echo "Hello, $name"
+```
+````
+
+```sh
+$ kevin
+Commands:
+  hello <name>  Say hello
+
+$ kevin hello world
+Hello, world
+```
 
 This README is itself a kevin file: run `kevin --help` in this repository to
-list its tasks (together with the ones from `build.md`).
+list its tasks (together with the ones from `build.md`). Using kevin from a
+coding agent? See [docs/for-agents.md](docs/for-agents.md).
 
 ## Install
 
@@ -347,6 +417,18 @@ and git hooks are in [CONTRIBUTING.md](CONTRIBUTING.md). Typical loop:
 kevin check     # format check + unit tests + end-to-end smoke test
 kevin release   # cross-compile for linux, macos and windows into dist/
 ```
+
+## Known limitations
+
+- Arguments reach scripts as named environment variables only; `$1`, `$@` and
+  variadic arguments are not supported.
+- Dependencies that run `async` print their output interleaved.
+- Task execution on Windows has not been exercised yet (it only cross-compiles).
+- `--from xc` does not read inputs given only through environment variables,
+  setext headings or org-mode files; `--from mask` keeps every code block of a
+  command, while mask runs only one.
+- The compatibility suite in `tests/compat` tracks each known gap as an
+  expected failure (`xfail`); run `kevin compat` to see the list.
 
 ## License
 
