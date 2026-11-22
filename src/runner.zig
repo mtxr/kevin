@@ -378,9 +378,10 @@ test "plan explains skipped blocks and missing runtimes" {
     try testing.expect(std.mem.indexOf(u8, steps[2].reason, "linux") != null);
     try testing.expectEqualStrings("no language", steps[3].reason);
 
-    try env.put("PATH", "/bin:/usr/bin");
-    const with_path = try planFor(arena, testing.io, &cmd, &env, .linux);
+    // A POSIX PATH is not a valid Windows path (the OS rejects the names).
     if (builtin.os.tag != .windows) {
+        try env.put("PATH", "/bin:/usr/bin");
+        const with_path = try planFor(arena, testing.io, &cmd, &env, .linux);
         try testing.expectEqual(Status.run, with_path[1].status);
         try testing.expectEqualStrings("-c", with_path[1].launch.?.argv[1]);
     }
