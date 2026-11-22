@@ -339,9 +339,9 @@ pub const Parser = struct {
 
 // ------------------------------------------------------------------ helpers
 
-const Heading = struct { level: u8, text: []const u8 };
+pub const Heading = struct { level: u8, text: []const u8 };
 
-fn parseHeading(line: []const u8) ?Heading {
+pub fn parseHeading(line: []const u8) ?Heading {
     var i: usize = 0;
     while (i < line.len and i < 4 and line[i] == ' ') : (i += 1) {}
     if (i > 3) return null;
@@ -359,9 +359,9 @@ fn parseHeading(line: []const u8) ?Heading {
     return .{ .level = @intCast(n), .text = text };
 }
 
-const Fence = struct { ch: u8, len: usize, indent: usize, info: []const u8 };
+pub const Fence = struct { ch: u8, len: usize, indent: usize, info: []const u8 };
 
-fn parseFence(line: []const u8) ?Fence {
+pub fn parseFence(line: []const u8) ?Fence {
     var indent: usize = 0;
     while (indent < line.len and (line[indent] == ' ' or line[indent] == '\t')) : (indent += 1) {}
     if (indent >= line.len) return null;
@@ -376,7 +376,7 @@ fn parseFence(line: []const u8) ?Fence {
 }
 
 /// A closing fence is >= `min_len` identical chars followed only by spaces.
-fn isClosingFence(line: []const u8, ch: u8, min_len: usize) bool {
+pub fn isClosingFence(line: []const u8, ch: u8, min_len: usize) bool {
     const t = std.mem.trim(u8, line, " \t");
     if (t.len < min_len) return false;
     for (t) |c| if (c != ch) return false;
