@@ -60,6 +60,17 @@ set -e
 
 mig=$($bin -f examples/tasks.md rodar-migracoes prod)
 case "$mig" in *'migrating prod'*'py sees prod'*) ;; *) echo "smoke: pipeline output mismatch"; exit 1 ;; esac
+# Migration from mask and xc produces files kevin can run.
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+$bin --from mask -f examples/maskfile.md -o "$tmp/mask.md" 2>/dev/null
+[ "$($bin -f "$tmp/mask.md" greet Ann -s)" = "HELLO, ANN" ] || { echo "smoke: mask migration failed"; exit 1; }
+[ "$($bin -f "$tmp/mask.md" both)" = "$(printf 'Hello, Mask\nservices are up')" ] || { echo "smoke: mask chaining failed"; exit 1; }
+$bin --from xc -f examples/xc.md -o "$tmp/xc.md" 2>/dev/null
+[ "$($bin -f "$tmp/xc.md" greet Joe)" = "Hello, Joe." ] || { echo "smoke: xc inputs failed"; exit 1; }
+[ "$($bin -f "$tmp/xc.md" both)" = "$(printf 'hi\nboth')" ] || { echo "smoke: xc requires failed"; exit 1; }
+$bin --from xc -f examples/maskfile.md -o "$tmp/none.md" 2>/dev/null && { echo "smoke: xc without Tasks accepted"; exit 1; }
+
 echo "smoke: ok"
 ```
 

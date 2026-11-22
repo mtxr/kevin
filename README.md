@@ -75,7 +75,7 @@ command tree, in that order. Pure namespaces are merged; if the same command
 exists in two files, the later file wins and a warning is printed.
 
 `kevin -f path/to/file.md ...` (or `--file`) uses exactly that file. Global
-flags are only recognised before the command name, so tasks are free to
+flags (`-f`, `--from`, `-o`) are only recognised before the command name, so tasks are free to
 declare their own `-f`.
 
 ## Declaring commands
@@ -175,29 +175,66 @@ files need small edits (see below). A `?` means the behaviour was not verified a
 |-------------------------------------------|------------------------|-------------------------------|-----------------------------------------|
 | Default file                              | `maskfile.md`          | `README.md`                   | `README.md`, `tasks.md`, `build.md` (merged) |
 | Explicit file flag                        | `--maskfile`           | ?                             | `-f` / `--file`                         |
-| Command declaration                       | every heading          | headings under `# Tasks`      | `## > name` or ```` ```lang task ````   |
-| Nested subcommands by heading depth       | yes                    | ?                             | yes                                     |
-| Subcommand names prefixed with parent (`### services start`) | yes | ?                        | no (use the hierarchy)                  |
+| Command declaration                       | every heading          | headings one level below a `Tasks` heading | `## > name` or ```` ```lang task ```` |
+| Nested subcommands by heading depth       | yes                    | no (flat list)                | yes                                     |
+| Subcommand names prefixed with parent (`### services start`) | yes | no                       | no (use the hierarchy)                  |
 | Description                               | `>` blockquote         | paragraph under heading       | `>` blockquote                          |
-| Required `(arg)` / optional `[arg]`       | yes                    | ?                             | yes                                     |
-| `**OPTIONS**` flags, `type`, `choices`, `required` | yes           | ?                             | yes (same syntax)                       |
+| Required `(arg)` / optional `[arg]`       | yes                    | `Inputs:` (+ `Env:` default)  | yes                                     |
+| Positional `$1` / `$@` in scripts         | no                     | yes                           | no (named env vars)                     |
+| `**OPTIONS**` flags, `type`, `choices`, `required` | yes           | no                            | yes (same syntax)                       |
 | Implicit `-v/--verbose` and `verbose` env | yes                    | ?                             | yes                                     |
 | Helper variables                          | `$MASK`, `$MASKFILE_DIR` | ?                           | `$KEVIN`, `$KEVIN_DIR`                  |
-| Runtimes                                  | shell, node, python, ruby, php, lua, swift, powershell, bat | ? | shell, node/bun, ts, python, ruby, php, lua, powershell, bat (no swift) |
+| Runtimes                                  | shell, node, python, ruby, php, lua, swift, powershell, bat | shell, or any interpreter via shebang | shell, node/bun, ts, python, ruby, php, lua, powershell, bat (no swift) |
 | OS-specific blocks                        | yes (matching block)   | ?                             | yes (family filter)                     |
 | Several blocks run in sequence            | ?                      | ?                             | yes                                     |
 | Inline tasks under plain headings         | no                     | ?                             | yes (`task` keyword)                    |
-| `Requires:` (task dependencies)           | no                     | yes                           | no (call `$KEVIN other` instead)       |
-| `Directory:` attribute                    | no                     | yes                           | no                                      |
-| `Env:` / `Run:` attributes                | no                     | ?                             | no                                      |
-| `Inputs:` environment variables           | no                     | yes                           | no (use args or flags)                  |
+| Call another task from a script           | `mask cmd` / `$MASK cmd` | via `Requires:`             | `$KEVIN cmd`                            |
+| `Requires:` (task dependencies)           | no                     | yes (`Run: once` dedupes)     | no (call `$KEVIN other`)                |
+| Parallel dependencies                     | no                     | yes (`RunDeps: async`)        | no                                      |
+| `Directory:` / `Env:` attributes          | no                     | yes                           | no                                      |
 | org-mode files                            | no                     | yes                           | no                                      |
 
-Migrating from mask: add `> ` after the `#`s of every command heading
-(`## serve (port)` becomes `## > serve (port)`), replace `$MASK` /
-`$MASKFILE_DIR` with `$KEVIN` / `$KEVIN_DIR`, and drop parent prefixes from
-subcommand names. Flags and code blocks work unchanged. Migrating from xc is
-a manual rewrite of tasks and their `Requires:` / `Inputs:` lines.
+## Migrating from mask or xc
+
+`kevin --from mask|xc` converts a file to kevin syntax. It reads `maskfile.md`
+(mask) or `README.md` (xc) unless you pass `-f`, prints to stdout, and with
+`-o <path>` writes a new file (it never overwrites an existing one). Anything
+it could not translate is listed on stderr as `kevin: note: ...`. Because it is
+a global flag rather than a command, it can never clash with your own tasks.
+
+```sh
+kevin --from mask > tasks.md
+kevin --from xc -f README.md -o tasks.md
+```
+
+**mask**: adds the `>` marker to every command heading (level 1 titles and
+anything inside code fences are left alone), strips parent prefixes
+(`### services start` under `## services` becomes `start`), and rewrites
+`$MASK`, `$MASKFILE_DIR` and `mask <cmd>` calls in executable blocks to
+`$KEVIN`, `$KEVIN_DIR` and `$KEVIN <cmd>`. Flags and code blocks are kept as is.
+`swift` blocks are reported because kevin cannot run them. Headings that are
+only documentation (several words, no matching parent) are renamed with
+hyphens and reported, so review the notes.
+
+**xc**: finds the `Tasks` section and converts each task, keeping all other
+prose.
+
+| xc                              | kevin                                                           |
+|---------------------------------|-----------------------------------------------------------------|
+| `### name`                      | `### > name`                                                    |
+| first description paragraph     | `> description`                                                 |
+| `Inputs: A, B`                  | `(A) (B)`; becomes `[A]` when `Env:` gives it a default         |
+| `Requires: a, b`                | a leading `sh` block calling `$KEVIN a` and `$KEVIN b`          |
+| `RunDeps: async`                | the same block, with the calls run in the background and awaited |
+| `Directory: x`                  | `cd "$KEVIN_DIR/x"` at the top of the script                    |
+| `Env: K=V`                      | `export K='V'`                                                  |
+| unlabeled block / shebang       | `sh`, or the language of the shebang (which is removed)         |
+| `Run: once`                     | not supported, reported                                         |
+| `$1`, `$@` in scripts           | not converted, reported (declare named args instead)            |
+
+xc runs tasks in the Markdown file's directory while kevin uses the current
+one; use `$KEVIN_DIR` when a task depends on the file's location. org-mode
+files are not supported.
 
 ## Development
 
