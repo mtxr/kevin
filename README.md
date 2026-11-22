@@ -248,4 +248,6 @@ kevin release   # cross-compile for linux, macos and windows into dist/
 
 ## License
 
-No license has been chosen yet.
+[MIT](LICENSE). Copies and substantial portions must keep the copyright
+notice and the license text. Third-party material is listed in
+`THIRD_PARTY_NOTICES.md` when present.
