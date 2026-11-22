@@ -88,6 +88,20 @@ $bin -j 0 -f examples/deps.md parallel >/dev/null 2>&1
 [ "$?" = "2" ] || { echo "smoke: invalid --jobs accepted"; exit 1; }
 set -e
 
+# Regressions: indented fences inside a block, flags without a flags line,
+# a UTF-8 BOM, and a directory without any task file.
+[ "$($bin -f examples/regressions.md heredoc | tail -n 1)" = "after" ] || { echo "smoke: indented fence truncated the script"; exit 1; }
+[ "$($bin -f examples/regressions.md heredoc | grep -c 'code sample')" = "1" ] || { echo "smoke: heredoc content lost"; exit 1; }
+[ "$($bin -f examples/regressions.md derived-flag --watch-mode)" = "watch_mode=true" ] || { echo "smoke: derived flag rejected"; exit 1; }
+printf '\357\273\277## > hi\n\n```sh\necho hi\n```\n' > "$tmp/bom.md"
+[ "$($bin -f "$tmp/bom.md" hi)" = "hi" ] || { echo "smoke: BOM hides the first heading"; exit 1; }
+mkdir "$tmp/empty"
+set +e
+msg=$(cd "$tmp/empty" && "$OLDPWD/$bin" build 2>&1)
+[ "$?" = "2" ] || { echo "smoke: missing task file did not exit 2"; exit 1; }
+set -e
+case "$msg" in *'no README.md, tasks.md or build.md found'*) ;; *) echo "smoke: wrong message without task files: $msg"; exit 1 ;; esac
+
 # --explain describes a command without running it; --version prints the version.
 exp=$($bin -f examples/tasks.md --explain hello World -t 2)
 case "$exp" in *'name (required) = World'*'argv:    bash -c <code>'*) ;; *) echo "smoke: explain output mismatch"; exit 1 ;; esac

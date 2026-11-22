@@ -140,8 +140,17 @@ pub fn main(init: std.process.Init) !u8 {
     var out_file = Io.File.stdout().writer(io, &out_buf);
     const out = &out_file.interface;
 
-    if (names.len == 0 and tokens.items.len == 0) {
-        return fail("no README.md, tasks.md or build.md found (use --file <path>)", .{});
+    if (names.len == 0) {
+        var only_help = tokens.items.len > 0;
+        for (tokens.items) |t| {
+            if (!std.mem.eql(u8, t, "-h") and !std.mem.eql(u8, t, "--help")) only_help = false;
+        }
+        if (only_help) {
+            try cli.printRootHelp(arena, out, root, sources.items);
+            try out.flush();
+            return 0;
+        }
+        return fail("no README.md, tasks.md or build.md found in the current directory (use --file <path>)", .{});
     }
 
     const resolved = try cli.resolve(arena, root, tokens.items);

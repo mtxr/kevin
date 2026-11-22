@@ -25,17 +25,34 @@ pub const Parsed = struct {
 
 /// Parse `src` (kept alive by `arena`) into a command tree.
 pub fn parseSource(arena: Allocator, source_path: []const u8, src: []const u8) Allocator.Error!Parsed {
+    // Editors on Windows often prepend a UTF-8 byte order mark; it would hide the first heading.
+    const no_bom = if (std.mem.startsWith(u8, src, "\xEF\xBB\xBF")) src[3..] else src;
     // Normalise CRLF so shell blocks never see stray '\r'.
-    const text = if (std.mem.indexOfScalar(u8, src, '\r') != null)
-        try std.mem.replaceOwned(u8, arena, src, "\r\n", "\n")
+    const text = if (std.mem.indexOfScalar(u8, no_bom, '\r') != null)
+        try std.mem.replaceOwned(u8, arena, no_bom, "\r\n", "\n")
     else
-        src;
+        no_bom;
 
     const root = try arena.create(Command);
     root.* = .{ .name = "", .source_path = source_path };
     var p: Parser = .{ .arena = arena, .source_path = source_path, .src = text, .root = root };
     try p.run();
+    try finalizeFlags(arena, root);
     return .{ .root = root, .warnings = p.warnings };
+}
+
+/// A flag without a `flags:` line answers to `--<name>` (lowercase, `_` as `-`),
+/// which is also what `--help` advertises.
+fn finalizeFlags(arena: Allocator, cmd: *Command) Allocator.Error!void {
+    for (cmd.flags.items) |*f| {
+        if (f.long != null) continue;
+        const buf = try arena.alloc(u8, f.name.len + 2);
+        buf[0] = '-';
+        buf[1] = '-';
+        for (f.name, buf[2..]) |c, *d| d.* = if (c == '_') '-' else std.ascii.toLower(c);
+        f.long = buf;
+    }
+    for (cmd.children.items) |c| try finalizeFlags(arena, c);
 }
 
 pub const Parser = struct {
@@ -83,7 +100,7 @@ pub const Parser = struct {
     fn feed(self: *Parser, line: []const u8, line_start: usize, line_end: usize) Allocator.Error!void {
         switch (self.state) {
             .in_code_block => {
-                if (isClosingFence(line, self.fence_char, self.fence_len)) {
+                if (isClosingFence(line, self.fence_char, self.fence_len, self.fence_indent)) {
                     try self.closeBlock(line_start);
                     self.state = .normal;
                 }
@@ -434,8 +451,13 @@ pub fn parseFence(line: []const u8) ?Fence {
     return .{ .ch = ch, .len = n, .indent = indent, .info = info };
 }
 
-/// A closing fence is >= `min_len` identical chars followed only by spaces.
-pub fn isClosingFence(line: []const u8, ch: u8, min_len: usize) bool {
+/// A closing fence is >= `min_len` identical chars followed only by spaces,
+/// indented at most 3 columns deeper than the opening fence (CommonMark).
+/// Deeper indentation is code content, e.g. a fence shown inside a heredoc.
+pub fn isClosingFence(line: []const u8, ch: u8, min_len: usize, open_indent: usize) bool {
+    var indent: usize = 0;
+    while (indent < line.len and (line[indent] == ' ' or line[indent] == '\t')) : (indent += 1) {}
+    if (indent > open_indent + 3) return false;
     const t = std.mem.trim(u8, line, " \t");
     if (t.len < min_len) return false;
     for (t) |c| if (c != ch) return false;
@@ -932,4 +954,86 @@ test "attribute-like prose is left alone and typos are reported" {
     // Only the single-word typo warns; the sentence is prose.
     try testing.expectEqual(@as(usize, 1), parsed.warnings.items.len);
     try testing.expect(std.mem.indexOf(u8, parsed.warnings.items[0], "'asynch'") != null);
+}
+
+test "a fence-like line indented inside a block does not close it" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const src =
+        \\## > doc
+        \\
+        \\```sh
+        \\cat <<'EOF'
+        \\    ```
+        \\    code sample
+        \\    ```
+        \\EOF
+        \\echo after
+        \\```
+        \\
+        \\- item
+        \\
+        \\    ```sh
+        \\    echo in list
+        \\    ```
+        \\
+        \\## > next
+        \\
+    ;
+    const root = (try parseForTest(arena, src)).root;
+    const doc = root.find("doc").?;
+    // The heredoc block keeps its indented fence lines and runs to its real end...
+    try testing.expectEqual(@as(usize, 2), doc.blocks.items.len);
+    try testing.expect(std.mem.indexOf(u8, doc.blocks.items[0].code, "    code sample") != null);
+    try testing.expect(std.mem.endsWith(u8, doc.blocks.items[0].code, "echo after\n"));
+    // ...and a fenced block indented inside a list item opens and closes at its own indentation.
+    try testing.expectEqualStrings("echo in list\n", doc.blocks.items[1].code);
+    try testing.expect(root.find("next") != null);
+}
+
+test "a UTF-8 byte order mark does not hide the first heading" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const root = (try parseForTest(arena, "\xEF\xBB\xBF## > hi\n\n```sh\necho hi\n```\n")).root;
+    try testing.expect(root.find("hi") != null);
+}
+
+test "a flag without a flags line gets a derived long name" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const src =
+        \\## > a
+        \\
+        \\**OPTIONS**
+        \\* Watch_Mode
+        \\    * desc: Rebuild on change
+        \\* port
+        \\    * flags: -p
+        \\    * type: number
+        \\
+        \\```sh
+        \\true
+        \\```
+        \\
+        \\## Inline
+        \\
+        \\**OPTIONS**
+        \\* dry_run
+        \\
+        \\```sh task
+        \\true
+        \\```
+        \\
+    ;
+    const root = (try parseForTest(arena, src)).root;
+    const a = root.find("a").?;
+    try testing.expectEqualStrings("--watch-mode", a.flags.items[0].long.?);
+    try testing.expectEqualStrings("-p", a.flags.items[1].short.?);
+    try testing.expectEqualStrings("--port", a.flags.items[1].long.?);
+    try testing.expectEqualStrings("--dry-run", root.find("inline").?.flags.items[0].long.?);
 }

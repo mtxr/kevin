@@ -35,10 +35,11 @@ pub const Result = struct {
 pub const Error = error{NoTasksSection} || Allocator.Error;
 
 pub fn migrate(arena: Allocator, source: Source, raw: []const u8) Error!Result {
-    const text = if (std.mem.indexOfScalar(u8, raw, '\r') != null)
-        try std.mem.replaceOwned(u8, arena, raw, "\r\n", "\n")
+    const no_bom = if (std.mem.startsWith(u8, raw, "\xEF\xBB\xBF")) raw[3..] else raw;
+    const text = if (std.mem.indexOfScalar(u8, no_bom, '\r') != null)
+        try std.mem.replaceOwned(u8, arena, no_bom, "\r\n", "\n")
     else
-        raw;
+        no_bom;
 
     var lines_list: std.ArrayList([]const u8) = .empty;
     var it = std.mem.splitScalar(u8, text, '\n');
@@ -78,15 +79,17 @@ fn classify(arena: Allocator, lines: []const []const u8) Allocator.Error![]LineK
     var in_fence = false;
     var ch: u8 = 0;
     var len: usize = 0;
+    var indent: usize = 0;
     for (lines, kinds) |line, *k| {
         if (!in_fence) {
             if (parser.parseFence(line)) |f| {
                 in_fence = true;
                 ch = f.ch;
                 len = f.len;
+                indent = f.indent;
                 k.* = .fence_open;
             } else k.* = .text;
-        } else if (parser.isClosingFence(line, ch, len)) {
+        } else if (parser.isClosingFence(line, ch, len, indent)) {
             in_fence = false;
             k.* = .fence_close;
         } else k.* = .code;

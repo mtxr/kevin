@@ -483,3 +483,30 @@ test "implicit flags and help text" {
     try printRootHelp(arena, &aw2.writer, root, &.{});
     try testing.expect(std.mem.indexOf(u8, aw2.written(), "serve sub") != null);
 }
+
+test "a flag declared without flags: is accepted by its derived name" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const src =
+        \\## > a
+        \\
+        \\**OPTIONS**
+        \\* watch_mode
+        \\    * desc: Rebuild on change
+        \\
+        \\```sh
+        \\true
+        \\```
+        \\
+    ;
+    const root = (try parser.parseSource(arena, "/x.md", src)).root;
+    const a = root.find("a").?;
+    var msg: []const u8 = "";
+    const inv = try parseInvocation(arena, a, &.{"--watch-mode"}, &msg);
+    try testing.expectEqualStrings("true", lookup(inv, "watch_mode").?);
+
+    var aw: Io.Writer.Allocating = .init(arena);
+    try printCommandHelp(arena, &aw.writer, a, &.{"a"});
+    try testing.expect(std.mem.indexOf(u8, aw.written(), "--watch-mode") != null);
+}
