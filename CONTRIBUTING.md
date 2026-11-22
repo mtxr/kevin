@@ -30,6 +30,22 @@ Run `kevin check` before opening a pull request. New behaviour needs a
 `test "..."` block next to the code it covers, and user-visible changes need
 a README update (the README is itself a kevin file, so keep its tasks working).
 
+## Continuous integration
+
+GitHub Actions runs on hosted runners (`.github/workflows`):
+
+- `ci.yml` on every push to `main` and every pull request: `kevin check` on
+  Linux and macOS, unit tests on Windows, a cross-compile of every release
+  target, and a lint of the pull request's commit messages.
+- `release.yml` when a `v*` tag is pushed: verifies that the tag matches the
+  version in `build.zig.zon`, runs `kevin check`, builds every target, and
+  publishes the archives with a `SHA256SUMS` file.
+
+Actions are pinned to commit SHAs. When bumping one, update the SHA and the
+tag named in the trailing comment together. To cut a release, change
+`.version` in `build.zig.zon`, merge, then push the matching tag
+(`git tag v0.1.0 && git push origin v0.1.0`).
+
 ## Commit messages
 
 History must stay English-only and use

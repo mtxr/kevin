@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZIG_VERSION: 0.17.0
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      # actions are pinned to commit SHAs; the comment names the tag they point to
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      # Bootstrap: the first binary is built with plain zig, every later step uses kevin.
+      - name: Build
+        run: zig build
+
+      # fmt check + unit tests + smoke test + mask/xc compatibility suite
+      # (the smoke and compat scripts need a POSIX sh, so this runs on unix only).
+      - name: kevin check
+        if: runner.os != 'Windows'
+        run: ./zig-out/bin/kevin check
+
+      - name: Unit tests (Windows)
+        if: runner.os == 'Windows'
+        run: zig build test --summary all
+
+  cross:
+    name: cross-compile all release targets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: zig build
+      - run: ./zig-out/bin/kevin release
+
+  commits:
+    name: commit messages
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: zig build
+      - name: Lint commit messages (English, Conventional Commits)
+        env:
+          # passed through the environment, never interpolated into the script
+          RANGE: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+        run: ./zig-out/bin/kevin -f CONTRIBUTING.md lint-commits --range "$RANGE"
