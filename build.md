@@ -71,6 +71,12 @@ $bin --from xc -f examples/xc.md -o "$tmp/xc.md" 2>/dev/null
 [ "$($bin -f "$tmp/xc.md" both)" = "$(printf 'hi\nboth')" ] || { echo "smoke: xc requires failed"; exit 1; }
 $bin --from xc -f examples/maskfile.md -o "$tmp/none.md" 2>/dev/null && { echo "smoke: xc without Tasks accepted"; exit 1; }
 
+# --explain describes a command without running it; --version prints the version.
+exp=$($bin -f examples/tasks.md --explain hello World -t 2)
+case "$exp" in *'name (required) = World'*'argv:    bash -c <code>'*) ;; *) echo "smoke: explain output mismatch"; exit 1 ;; esac
+$bin -f examples/tasks.md --explain hello World -t abc >/dev/null 2>&1 && { echo "smoke: explain accepted bad input"; exit 1; }
+case "$($bin --version)" in "kevin "*) ;; *) echo "smoke: unexpected version output"; exit 1 ;; esac
+
 echo "smoke: ok"
 ```
 

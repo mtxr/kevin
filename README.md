@@ -75,7 +75,7 @@ command tree, in that order. Pure namespaces are merged; if the same command
 exists in two files, the later file wins and a warning is printed.
 
 `kevin -f path/to/file.md ...` (or `--file`) uses exactly that file. Global
-flags (`-f`, `--from`, `-o`) are only recognised before the command name, so tasks are free to
+flags (`-f`, `--from`, `-o`, `--explain`) are only recognised before the command name, so tasks are free to
 declare their own `-f`.
 
 ## Declaring commands
@@ -129,6 +129,20 @@ otherwise). `number` and `choices` are validated before anything runs, and
 Every command also accepts `-h/--help` (generated from the file) and
 `-v/--verbose`, which echoes each block before running it and sets
 `verbose=true`.
+
+## Explaining a command
+
+`kevin --explain <command> [args]` shows how a command was resolved without
+running anything: the merged source files, where the command is declared,
+each argument and flag with its validated value, the variables kevin injects,
+and, for every code block, whether it would run or be skipped (and why), which
+runtime was picked from `PATH`, the final argv and the code. It exits with 2
+when validation fails and 127 when a runtime is missing, so it also works as a
+pre-flight check. Like the other global flags it goes before the command name.
+
+```sh
+kevin --explain hello World -t 2 -c red
+```
 
 ## Environment
 
