@@ -6,6 +6,7 @@ const parser = @import("parser.zig");
 const cli = @import("cli.zig");
 const runner = @import("runner.zig");
 const migrate = @import("migrate.zig");
+const build_options = @import("build_options");
 
 test {
     _ = ast;
@@ -65,6 +66,12 @@ pub fn main(init: std.process.Init) !u8 {
             file_arg = argv[i];
         } else if (std.mem.startsWith(u8, a, "--file=")) {
             file_arg = a["--file=".len..];
+        } else if (std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V")) {
+            var buf: [64]u8 = undefined;
+            var w = Io.File.stdout().writer(io, &buf);
+            try w.interface.print("kevin {s}\n", .{build_options.version});
+            try w.interface.flush();
+            return 0;
         } else if (std.mem.eql(u8, a, "--from")) {
             i += 1;
             if (i >= argv.len) return fail("--from requires 'mask' or 'xc'", .{});

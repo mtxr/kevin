@@ -1,8 +1,13 @@
 const std = @import("std");
 
+const manifest = @import("build.zig.zon");
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", manifest.version);
 
     const exe = b.addExecutable(.{
         .name = "kevin",
@@ -10,6 +15,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{.{ .name = "build_options", .module = options.createModule() }},
         }),
     });
     b.installArtifact(exe);
