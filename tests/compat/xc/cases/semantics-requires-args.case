@@ -2,4 +2,3 @@
 input: semantics__requires-args.md
 args: call
 stdout-equals: Hello, Joe\ncall
-xfail: Requires values are split on spaces as well as commas, so "greet Joe" becomes two tasks

@@ -3,4 +3,3 @@ input: semantics__shell.md
 args: bashisms
 stdout-equals: bash array c
 output-contains: ```bash
-xfail: untagged blocks are migrated to sh, not bash

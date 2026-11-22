@@ -3,5 +3,4 @@ input: docs__requires.md
 lists: Test
 lists: Lint
 lists: Deploy
-output-contains: $KEVIN Test
-output-contains: $KEVIN Lint
+output-contains: Requires: Test, Lint

@@ -2,4 +2,3 @@
 input: semantics__run-once.md
 args: b
 stdout-equals: setup-ran\na\nb
-xfail: Run: once is not supported; setup runs twice

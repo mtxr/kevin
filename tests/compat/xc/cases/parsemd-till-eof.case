@@ -3,5 +3,6 @@ input: parsemd__till-eof.md
 lists: generate-templ
 lists: generate-translations
 lists: generate-all
-output-contains: $KEVIN generate-templ & pids="$pids $!"
+output-contains: Requires: generate-templ, generate-translations
+output-contains: RunDeps: async
 output-contains: ```bash

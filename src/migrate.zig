@@ -50,6 +50,14 @@ pub fn migrate(arena: Allocator, source: Source, raw: []const u8) Error!Result {
     const kinds = try classify(arena, lines);
 
     var notes: std.ArrayList([]const u8) = .empty;
+    var open_line: ?usize = null;
+    for (kinds, 0..) |k, i| switch (k) {
+        .fence_open => open_line = i + 1,
+        .fence_close => open_line = null,
+        else => {},
+    };
+    if (open_line) |l| try note(arena, &notes, "the code block opened on line {d} is not ended; it was kept as is", .{l});
+
     var out: std.ArrayList(u8) = .empty;
     switch (source) {
         .mask => try migrateMask(arena, lines, kinds, &out, &notes),
@@ -262,20 +270,6 @@ fn rewriteMaskLine(arena: Allocator, line: []const u8, count: *usize) Allocator.
 
 // ---------------------------------------------------------------------- xc
 
-const Attr = struct { key: []const u8, val: []const u8 };
-
-const attr_keys = [_][]const u8{ "requires", "req", "run", "rundeps", "directory", "dir", "env", "environment", "inputs", "interactive" };
-
-fn parseAttr(line: []const u8) ?Attr {
-    const t = std.mem.trim(u8, line, " \t");
-    const colon = std.mem.indexOfScalar(u8, t, ':') orelse return null;
-    const key = std.mem.trim(u8, t[0..colon], " \t");
-    for (attr_keys) |k| {
-        if (std.ascii.eqlIgnoreCase(key, k)) return .{ .key = k, .val = std.mem.trim(u8, t[colon + 1 ..], " \t") };
-    }
-    return null;
-}
-
 const EnvVar = struct { name: []const u8, value: []const u8 };
 
 fn langFromShebang(line: []const u8) ?[]const u8 {
@@ -376,7 +370,6 @@ fn migrateXc(
         }
     }
 
-    var converted: usize = 0;
     var i: usize = 0;
     while (i < lines.len) {
         const line = lines[i];
@@ -403,11 +396,7 @@ fn migrateXc(
             }
         }
         try convertXcTask(arena, lines, kinds, i, task_end, level, out, notes);
-        converted += 1;
         i = task_end;
-    }
-    if (converted > 0) {
-        try note(arena, notes, "xc runs tasks in the Markdown file's directory; kevin runs them in the current directory (use $KEVIN_DIR when a task needs the file's location)", .{});
     }
 }
 
@@ -443,39 +432,42 @@ fn convertXcTask(
     var envs: std.ArrayList(EnvVar) = .empty;
     var dir: ?[]const u8 = null;
     var async_deps = false;
+    var run_once = false;
     var prose: std.ArrayList([]const u8) = .empty;
 
     for (lines[head + 1 .. pre_end]) |l| {
-        const attr = parseAttr(l) orelse {
+        const attr = parser.parseAttr(l) orelse {
             try prose.append(arena, l);
             continue;
         };
-        const key = attr.key;
-        if (std.mem.eql(u8, key, "requires") or std.mem.eql(u8, key, "req")) {
-            try splitList(arena, attr.val, &requires);
-        } else if (std.mem.eql(u8, key, "inputs")) {
-            try splitList(arena, attr.val, &inputs);
-        } else if (std.mem.eql(u8, key, "dir") or std.mem.eql(u8, key, "directory")) {
-            dir = attr.val;
-        } else if (std.mem.eql(u8, key, "env") or std.mem.eql(u8, key, "environment")) {
-            var it = std.mem.splitScalar(u8, attr.val, ',');
-            while (it.next()) |pair| {
-                const p = std.mem.trim(u8, pair, " \t");
-                if (p.len == 0) continue;
-                const eq = std.mem.indexOfScalar(u8, p, '=') orelse {
-                    try note(arena, notes, "task '{s}': ignored Env entry '{s}' without '='", .{ name, p });
-                    continue;
-                };
-                try envs.append(arena, .{ .name = std.mem.trim(u8, p[0..eq], " \t"), .value = std.mem.trim(u8, p[eq + 1 ..], " \t") });
-            }
-        } else if (std.mem.eql(u8, key, "run")) {
-            if (std.ascii.eqlIgnoreCase(attr.val, "once")) {
-                try note(arena, notes, "task '{s}': `Run: once` is not supported; it will run every time it is required", .{name});
-            }
-        } else if (std.mem.eql(u8, key, "rundeps")) {
-            async_deps = std.ascii.eqlIgnoreCase(attr.val, "async");
+        switch (attr.kind) {
+            .requires => {
+                // Entries are comma separated; each one is a task name plus its arguments.
+                var it = std.mem.splitScalar(u8, attr.val, ',');
+                while (it.next()) |e| {
+                    const entry = parser.stripDecor(e);
+                    if (entry.len > 0) try requires.append(arena, entry);
+                }
+            },
+            .inputs => try splitList(arena, attr.val, &inputs),
+            .directory => dir = attr.val,
+            .env => {
+                var it = std.mem.splitScalar(u8, attr.val, ',');
+                while (it.next()) |pair| {
+                    const pr = parser.stripDecor(pair);
+                    if (pr.len == 0) continue;
+                    const eq = std.mem.indexOfScalar(u8, pr, '=') orelse {
+                        try note(arena, notes, "task '{s}': ignored Env entry '{s}' without '='", .{ name, pr });
+                        continue;
+                    };
+                    try envs.append(arena, .{ .name = parser.stripDecor(pr[0..eq]), .value = parser.stripDecor(pr[eq + 1 ..]) });
+                }
+            },
+            .run => run_once = std.ascii.eqlIgnoreCase(attr.val, "once"),
+            .run_deps => async_deps = std.ascii.eqlIgnoreCase(attr.val, "async"),
+            .interactive => {}, // deprecated in xc, no effect
+            .jobs => try prose.append(arena, l), // not an xc attribute
         }
-        // `Interactive` is deprecated in xc and has no effect.
     }
 
     // Heading with parameters taken from Inputs; an Env default makes an input optional.
@@ -510,18 +502,15 @@ fn convertXcTask(
     }
     if (wrote_rest and std.mem.trim(u8, prose.items[prose.items.len - 1], " \t").len != 0) try out.append(arena, '\n');
 
-    // Dependencies become calls to kevin itself, in a block of their own.
+    // Dependencies map onto kevin's own attributes.
     if (requires.items.len > 0) {
-        try out.appendSlice(arena, "```sh\n");
-        if (async_deps) {
-            try out.appendSlice(arena, "pids=\"\"\n");
-            for (requires.items) |r| try out.print(arena, "$KEVIN {s} & pids=\"$pids $!\"\n", .{r});
-            try out.appendSlice(arena, "for pid in $pids; do wait \"$pid\" || exit $?; done\n");
-        } else {
-            for (requires.items) |r| try out.print(arena, "$KEVIN {s}\n", .{r});
-        }
-        try out.appendSlice(arena, "```\n\n");
+        try out.appendSlice(arena, "Requires: ");
+        for (requires.items, 0..) |r, i| try out.print(arena, "{s}{s}", .{ if (i > 0) ", " else "", r });
+        try out.append(arena, '\n');
+        if (async_deps) try out.appendSlice(arena, "RunDeps: async\n");
     }
+    if (run_once) try out.appendSlice(arena, "Run: once\n");
+    if (requires.items.len > 0 or run_once) try out.append(arena, '\n');
 
     // The task script itself.
     var tail_start = task_end;
@@ -544,10 +533,18 @@ fn convertXcTask(
             }
             code = code[1..];
         }
-        if (lang.len == 0) lang = "sh";
+        // xc runs untagged blocks with bash, stopping at the first failing command.
+        var implicit_bash = false;
+        if (lang.len == 0) {
+            lang = "bash";
+            implicit_bash = true;
+        }
 
         const shell = isShellLang(lang);
         const has_setup = dir != null or envs.items.len > 0;
+        if (!shell and dir == null) {
+            try note(arena, notes, "task '{s}': xc runs it in the Markdown file's directory; kevin runs this {s} block in the current directory (use $KEVIN_DIR)", .{ name, lang });
+        }
         if (has_setup and !shell) {
             try note(arena, notes, "task '{s}': Directory/Env cannot be applied to a {s} block; set them manually", .{ name, lang });
         }
@@ -557,6 +554,8 @@ fn convertXcTask(
 
         try out.print(arena, "{s}{s}\n", .{ try fenceOf(arena, f), lang });
         if (shell) {
+            if (implicit_bash) try out.appendSlice(arena, "set -e\n");
+            // xc runs tasks in the Markdown file's directory unless `Directory:` says otherwise.
             if (dir) |d| {
                 const dd = std.mem.trim(u8, d, " \t");
                 if (!std.mem.eql(u8, dd, "$PWD")) {
@@ -569,6 +568,8 @@ fn convertXcTask(
                 } else {
                     try note(arena, notes, "task '{s}': `Directory: $PWD` is already kevin's default", .{name});
                 }
+            } else {
+                try out.appendSlice(arena, "cd \"$KEVIN_DIR\"\n");
             }
             for (envs.items) |e| {
                 var is_input = false;
@@ -589,6 +590,8 @@ fn convertXcTask(
         } else {
             try appendLine(arena, out, try fenceOf(arena, f));
         }
+    } else if (requires.items.len == 0) {
+        try note(arena, notes, "task '{s}' has no commands (no script and no Requires)", .{name});
     } else if (dir != null or envs.items.len > 0) {
         try note(arena, notes, "task '{s}': Directory/Env were dropped because the task has no script", .{name});
     }
@@ -707,22 +710,26 @@ test "xc: tasks, attributes, inputs, env and shebang" {
     try testing.expect(std.mem.indexOf(u8, o, "## Tasks\n") != null);
     try testing.expect(std.mem.indexOf(u8, o, "### > test\n> Run the tests.\n") != null);
     try testing.expect(std.mem.indexOf(u8, o, "### > deploy (TARGET) [NAME]\n> Deploy it.\n") != null);
-    try testing.expect(std.mem.indexOf(u8, o, "$KEVIN test\n$KEVIN lint\n") != null);
+    try testing.expect(std.mem.indexOf(u8, o, "Requires: test, lint\n") != null);
     try testing.expect(std.mem.indexOf(u8, o, "cd \"$KEVIN_DIR/deployment\"\n") != null);
     try testing.expect(std.mem.indexOf(u8, o, "export STAGE='prod'\n") != null);
     try testing.expect(std.mem.indexOf(u8, o, "export NAME=\"${NAME:-World}\"\n") != null);
     try testing.expect(std.mem.indexOf(u8, o, "```python\nprint(\"hi\")\n```") != null);
     try testing.expect(std.mem.indexOf(u8, o, "Not touched.") != null);
-    try testing.expect(std.mem.indexOf(u8, o, "Requires:") == null);
+    // Inputs, Env, Directory and the description were consumed; Requires stays as a kevin attribute.
+    try testing.expect(std.mem.indexOf(u8, o, "Inputs:") == null);
+    try testing.expect(std.mem.indexOf(u8, o, "Directory:") == null);
 
     const parsed = try parser.parseSource(arena, "/x.md", o);
     const deploy = parsed.root.find("deploy").?;
     try testing.expectEqual(@as(usize, 2), deploy.args.items.len);
     try testing.expect(deploy.args.items[0].required);
     try testing.expect(!deploy.args.items[1].required);
-    try testing.expectEqual(@as(usize, 2), deploy.blocks.items.len); // deps + script
+    try testing.expectEqual(@as(usize, 1), deploy.blocks.items.len);
+    try testing.expectEqual(@as(usize, 2), deploy.deps.requires.items.len);
     try testing.expectEqualStrings("python", parsed.root.find("py").?.blocks.items[0].lang);
-    try testing.expectEqualStrings("sh", parsed.root.find("test").?.blocks.items[0].lang);
+    try testing.expectEqualStrings("bash", parsed.root.find("test").?.blocks.items[0].lang);
+    try testing.expect(std.mem.indexOf(u8, o, "set -e\ncd \"$KEVIN_DIR\"\ngo test") != null);
 }
 
 test "xc: missing Tasks section and positional warning" {

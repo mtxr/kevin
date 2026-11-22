@@ -2,4 +2,3 @@
 input: parsemd__attributes.md
 args: hello
 stdout-equals: somevar=[val]
-xfail: Markdown formatting characters (_ * `) around attribute values are not stripped, producing a broken export line

@@ -2,4 +2,3 @@
 input: parsemd__attributes.md
 output-not-contains: **Requires**
 lists: fmt
-xfail: an attribute written as **Requires**: is not recognised and ends up in the description

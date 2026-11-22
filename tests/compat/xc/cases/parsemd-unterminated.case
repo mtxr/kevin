@@ -1,4 +1,3 @@
 # Source: joerdav/xc parser/parsemd/parsemd_test.go TestUnTerminatedCodeBlock: xc rejects an unterminated code block
 input: parsemd__unterminated.md
 notes-contains: not ended
-xfail: an unterminated code block is closed silently instead of being reported
