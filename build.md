@@ -71,6 +71,23 @@ $bin --from xc -f examples/xc.md -o "$tmp/xc.md" 2>/dev/null
 [ "$($bin -f "$tmp/xc.md" both)" = "$(printf 'hi\nboth')" ] || { echo "smoke: xc requires failed"; exit 1; }
 $bin --from xc -f examples/maskfile.md -o "$tmp/none.md" 2>/dev/null && { echo "smoke: xc without Tasks accepted"; exit 1; }
 
+# Dependencies: order, once-per-run, async, arguments, failure and cycles.
+[ "$($bin -f examples/deps.md ordered)" = "$(printf 'setup\nstep 1\nstep 2\nordered')" ] || { echo "smoke: sync requires failed"; exit 1; }
+par=$($bin -f examples/deps.md parallel)
+[ "$(printf '%s\n' "$par" | grep -c '^setup$')" = "1" ] || { echo "smoke: Run: once did not dedupe"; exit 1; }
+[ "$(printf '%s\n' "$par" | grep -c '^step ')" = "3" ] && [ "$(printf '%s\n' "$par" | tail -n 1)" = "parallel" ] || { echo "smoke: async requires failed"; exit 1; }
+[ "$($bin -j 1 -f examples/deps.md parallel | tail -n 1)" = "parallel" ] || { echo "smoke: --jobs 1 failed"; exit 1; }
+[ "$($bin -f examples/deps.md forward x | tail -n 1)" = "forward x" ] || { echo "smoke: argument expansion failed"; exit 1; }
+set +e
+out=$($bin -f examples/deps.md fails)
+[ "$?" = "9" ] || { echo "smoke: dependency failure code not propagated"; exit 1; }
+case "$out" in *"never printed"*) echo "smoke: script ran after a failed dependency"; exit 1 ;; esac
+$bin -f examples/deps.md loop-a >/dev/null 2>&1
+[ "$?" = "2" ] || { echo "smoke: dependency cycle not rejected"; exit 1; }
+$bin -j 0 -f examples/deps.md parallel >/dev/null 2>&1
+[ "$?" = "2" ] || { echo "smoke: invalid --jobs accepted"; exit 1; }
+set -e
+
 # --explain describes a command without running it; --version prints the version.
 exp=$($bin -f examples/tasks.md --explain hello World -t 2)
 case "$exp" in *'name (required) = World'*'argv:    bash -c <code>'*) ;; *) echo "smoke: explain output mismatch"; exit 1 ;; esac

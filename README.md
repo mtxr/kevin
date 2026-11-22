@@ -75,7 +75,7 @@ command tree, in that order. Pure namespaces are merged; if the same command
 exists in two files, the later file wins and a warning is printed.
 
 `kevin -f path/to/file.md ...` (or `--file`) uses exactly that file. Global
-flags (`-f`, `--from`, `-o`, `--explain`) are only recognised before the command name, so tasks are free to
+flags (`-f`, `-j`, `--from`, `-o`, `--explain`) are only recognised before the command name, so tasks are free to
 declare their own `-f`.
 
 ## Declaring commands
@@ -130,6 +130,46 @@ Every command also accepts `-h/--help` (generated from the file) and
 `-v/--verbose`, which echoes each block before running it and sets
 `verbose=true`.
 
+## Dependencies
+
+A command can require other commands. Put `Requires:` (and optionally
+`RunDeps:`, `Run:` and `Jobs:`) lines under the heading, before the first code
+block. They work on `>` commands and on inline tasks. A command with only
+`Requires:` and no code block is a runnable group.
+
+````md
+## > deploy (target)
+> Ship to an environment
+
+Requires: test, build $target
+RunDeps: async
+Jobs: 2
+
+```sh
+./deploy.sh "$target"
+```
+````
+
+| Attribute        | Meaning                                                                          |
+|------------------|----------------------------------------------------------------------------------|
+| `Requires: a, b` | Comma separated entries. Each is a command name followed by its arguments, with `$name` / `${name}` expanded from the requiring command's own arguments and flags. Alias: `Req:` |
+| `RunDeps: async` | Run the dependencies concurrently. `sync` (the default) runs them in order. Alias: `RunDependencies:` |
+| `Run: once`      | Run this command a single time per invocation, however many commands require it. `always` is the default |
+| `Jobs: N`        | At most N of this command's dependencies at the same time (async only)           |
+
+The whole dependency tree is resolved before anything runs, so unknown names,
+bad arguments and cycles (`dependency cycle: a -> b -> a`) fail up front with
+exit code 2. Sync dependencies stop at the first failure. Async dependencies
+all run to completion, then kevin fails with the first failing exit code in
+declaration order; their output is interleaved. Failing dependencies stop the
+command's own script from running, and the exit code is propagated.
+
+`-j N` / `--jobs N` (or `KEVIN_JOBS=N`) caps how many scripts run at once across
+the whole tree. The default is the number of CPUs. `Jobs:` limits one command's
+group of dependencies, and `--jobs` still applies on top. Scripts that call
+`$KEVIN other` start a separate kevin process, which inherits `KEVIN_JOBS` but
+counts its own scripts.
+
 ## Explaining a command
 
 `kevin --explain <command> [args]` shows how a command was resolved without
@@ -152,6 +192,7 @@ Arguments and flags are injected into the script's environment, along with:
 |---------------|--------------------------------------------------------------|
 | `$KEVIN`      | `<kevin binary> --file <absolute path of the declaring .md>` |
 | `$KEVIN_DIR`  | Directory of the Markdown file that declared the task        |
+| `KEVIN_JOBS`  | Maximum number of scripts running at once                    |
 | `verbose`, `KEVIN_VERBOSE` | `true` when `-v/--verbose` was given            |
 
 `$KEVIN other-task` lets a task call its siblings from any directory. The value
@@ -203,9 +244,9 @@ files need small edits (see below). A `?` means the behaviour was not verified a
 | Several blocks run in sequence            | ?                      | ?                             | yes                                     |
 | Inline tasks under plain headings         | no                     | ?                             | yes (`task` keyword)                    |
 | Call another task from a script           | `mask cmd` / `$MASK cmd` | via `Requires:`             | `$KEVIN cmd`                            |
-| `Requires:` (task dependencies)           | no                     | yes (`Run: once` dedupes)     | no (call `$KEVIN other`)                |
-| Parallel dependencies                     | no                     | yes (`RunDeps: async`)        | no                                      |
-| `Directory:` / `Env:` attributes          | no                     | yes                           | no                                      |
+| `Requires:` (task dependencies)           | no                     | yes (`Run: once` dedupes)     | yes, same syntax and `Run: once`        |
+| Parallel dependencies                     | no                     | yes (`RunDeps: async`)        | yes (`RunDeps: async`, `--jobs`, `Jobs:`) |
+| `Directory:` / `Env:` attributes          | no                     | yes                           | no (translated by `--from xc`)          |
 | org-mode files                            | no                     | yes                           | no                                      |
 
 ## Migrating from mask or xc
@@ -238,17 +279,17 @@ prose.
 | `### name`                      | `### > name`                                                    |
 | first description paragraph     | `> description`                                                 |
 | `Inputs: A, B`                  | `(A) (B)`; becomes `[A]` when `Env:` gives it a default         |
-| `Requires: a, b`                | a leading `sh` block calling `$KEVIN a` and `$KEVIN b`          |
-| `RunDeps: async`                | the same block, with the calls run in the background and awaited |
-| `Directory: x`                  | `cd "$KEVIN_DIR/x"` at the top of the script                    |
+| `Requires: a, b`                | `Requires: a, b` (kept as is, arguments included)               |
+| `RunDeps: async`                | `RunDeps: async`                                                |
+| `Run: once`                     | `Run: once`                                                     |
+| `Directory: x`, or none         | `cd "$KEVIN_DIR/x"`, or `cd "$KEVIN_DIR"` as xc runs in the file's directory |
 | `Env: K=V`                      | `export K='V'`                                                  |
-| unlabeled block / shebang       | `sh`, or the language of the shebang (which is removed)         |
-| `Run: once`                     | not supported, reported                                         |
+| unlabeled block / shebang       | `bash` with `set -e` (as xc runs it), or the shebang's language (shebang removed) |
 | `$1`, `$@` in scripts           | not converted, reported (declare named args instead)            |
 
-xc runs tasks in the Markdown file's directory while kevin uses the current
-one; use `$KEVIN_DIR` when a task depends on the file's location. org-mode
-files are not supported.
+Shell scripts migrated from xc `cd` into the file's directory, like xc does;
+other runtimes keep the current directory and are reported. org-mode files are
+not supported.
 
 ## Development
 
