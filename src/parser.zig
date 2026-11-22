@@ -52,6 +52,8 @@ pub const Parser = struct {
 
     /// Flags declared before an inline task block (plain heading on top).
     pending_flags: std.ArrayList(Flag) = .empty,
+    /// Dependency attributes declared before an inline task block.
+    pending_deps: ast.DepSpec = .{},
     /// Command still accepting `> description` lines.
     pending_desc: ?*Command = null,
     opt_target: ?*std.ArrayList(Flag) = null,
@@ -102,6 +104,17 @@ pub const Parser = struct {
         if (parseFence(line)) |f| return self.openFence(f, line_end);
         _ = line_start;
 
+        // `Requires:`, `RunDeps:`, `Run:` and `Jobs:` lines, until the first code block.
+        if (parseAttr(line)) |attr| attr_blk: {
+            if (self.stack_len == 0) break :attr_blk;
+            const top = self.stack[self.stack_len - 1];
+            const spec: *ast.DepSpec = if (top.cmd) |c| blk: {
+                if (c.blocks.items.len > 0) break :attr_blk;
+                break :blk &c.deps;
+            } else &self.pending_deps;
+            if (try self.applyDep(spec, attr)) return;
+        }
+
         const t = std.mem.trim(u8, line, " \t");
         if (isOptionsMarker(t)) {
             if (self.stack_len == 0) return;
@@ -136,6 +149,7 @@ pub const Parser = struct {
     fn heading(self: *Parser, level: u8, text: []const u8) Allocator.Error!void {
         while (self.stack_len > 0 and self.stack[self.stack_len - 1].level >= level) self.stack_len -= 1;
         self.pending_flags.clearRetainingCapacity();
+        self.pending_deps = .{};
         self.pending_desc = null;
 
         if (text.len > 0 and text[0] == '>') {
@@ -197,6 +211,8 @@ pub const Parser = struct {
         self.block_line = self.line_no;
         self.block_target = null;
         self.pending_desc = null;
+        const deps_spec = self.pending_deps;
+        self.pending_deps = .{};
 
         const top: ?StackEntry = if (self.stack_len > 0) self.stack[self.stack_len - 1] else null;
         if (top) |t| {
@@ -241,6 +257,7 @@ pub const Parser = struct {
         const cmd = try self.arena.create(Command);
         cmd.* = .{ .name = name, .source_path = self.source_path, .decl_line = decl_line };
         try parseParams(self.arena, info.params, &cmd.args);
+        cmd.deps = deps_spec;
         try cmd.flags.appendSlice(self.arena, self.pending_flags.items);
         self.pending_flags.clearRetainingCapacity();
         if (parent.findIndex(name)) |idx| {
@@ -331,6 +348,48 @@ pub const Parser = struct {
         }
     }
 
+    /// Returns false when `attr` is not a kevin dependency attribute (it stays prose).
+    fn applyDep(self: *Parser, spec: *ast.DepSpec, attr: Attr) Allocator.Error!bool {
+        switch (attr.kind) {
+            .requires => {
+                var it = std.mem.splitScalar(u8, attr.val, ',');
+                while (it.next()) |entry| {
+                    const e = stripDecor(entry);
+                    if (e.len > 0) try spec.requires.append(self.arena, e);
+                }
+            },
+            .run => {
+                if (std.ascii.eqlIgnoreCase(attr.val, "once")) {
+                    spec.run_once = true;
+                } else if (std.ascii.eqlIgnoreCase(attr.val, "always")) {
+                    spec.run_once = false;
+                } else return self.badAttr("Run:", "'once' or 'always'", attr.val);
+            },
+            .run_deps => {
+                if (std.ascii.eqlIgnoreCase(attr.val, "async")) {
+                    spec.run_deps = .async;
+                } else if (std.ascii.eqlIgnoreCase(attr.val, "sync")) {
+                    spec.run_deps = .sync;
+                } else return self.badAttr("RunDeps:", "'sync' or 'async'", attr.val);
+            },
+            .jobs => {
+                const n = std.fmt.parseInt(u32, attr.val, 10) catch 0;
+                if (n == 0) return self.badAttr("Jobs:", "a positive integer", attr.val);
+                spec.jobs = n;
+            },
+            else => return false,
+        }
+        return true;
+    }
+
+    /// A single-word bad value is a typo worth a warning; anything longer is
+    /// ordinary prose that merely starts with an attribute name.
+    fn badAttr(self: *Parser, key: []const u8, expected: []const u8, val: []const u8) Allocator.Error!bool {
+        if (val.len > 12 or std.mem.indexOfAny(u8, val, " \t") != null) return false;
+        try self.warn("line {d}: '{s}' expects {s}, got '{s}'", .{ self.line_no, key, expected, val });
+        return true;
+    }
+
     fn warn(self: *Parser, comptime fmt: []const u8, args: anytype) Allocator.Error!void {
         const msg = try std.fmt.allocPrint(self.arena, "{s}: " ++ fmt, .{self.source_path} ++ args);
         try self.warnings.append(self.arena, msg);
@@ -387,6 +446,42 @@ fn isOptionsMarker(t: []const u8) bool {
     var s = t;
     if (s.len > 0 and s[s.len - 1] == ':') s = s[0 .. s.len - 1];
     return std.ascii.eqlIgnoreCase(s, "**OPTIONS**");
+}
+
+pub const AttrKind = enum { requires, run, run_deps, jobs, directory, env, inputs, interactive };
+
+pub const Attr = struct { kind: AttrKind, val: []const u8 };
+
+const attr_names = [_]struct { []const u8, AttrKind }{
+    .{ "requires", .requires },
+    .{ "req", .requires },
+    .{ "run", .run },
+    .{ "rundeps", .run_deps },
+    .{ "rundependencies", .run_deps },
+    .{ "jobs", .jobs },
+    // xc attributes: kevin ignores these, `--from xc` translates them.
+    .{ "directory", .directory },
+    .{ "dir", .directory },
+    .{ "env", .env },
+    .{ "environment", .env },
+    .{ "inputs", .inputs },
+    .{ "interactive", .interactive },
+};
+
+/// Strips spaces and Markdown emphasis characters (`_`, `*`, backticks).
+pub fn stripDecor(s: []const u8) []const u8 {
+    return std.mem.trim(u8, s, " \t_*`");
+}
+
+/// Recognises `Key: value` attribute lines, tolerating `**Key**:` and `` `value` `` decoration.
+pub fn parseAttr(line: []const u8) ?Attr {
+    const t = std.mem.trim(u8, line, " \t");
+    const colon = std.mem.indexOfScalar(u8, t, ':') orelse return null;
+    const key = stripDecor(t[0..colon]);
+    for (attr_names) |n| {
+        if (std.ascii.eqlIgnoreCase(key, n[0])) return .{ .kind = n[1], .val = stripDecor(t[colon + 1 ..]) };
+    }
+    return null;
 }
 
 const Info = struct {
@@ -758,4 +853,83 @@ test "slugify" {
     const arena = arena_state.allocator();
     try testing.expectEqualStrings("rodar-migracoes", try slugify(arena, "Rodar Migrações"));
     try testing.expectEqualStrings("a-b-c", try slugify(arena, "  A -- B / C!  "));
+}
+
+test "dependency attributes on marked and inline commands" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const src =
+        \\## > deploy
+        \\> Ship it
+        \\
+        \\Requires: test, build web
+        \\**RunDeps**: async
+        \\`Jobs`: 2
+        \\Run: once
+        \\
+        \\```sh
+        \\echo deploy
+        \\Requires: not an attribute once code has started
+        \\```
+        \\
+        \\## Docs
+        \\
+        \\req: deploy
+        \\
+        \\```sh task
+        \\echo docs
+        \\```
+        \\
+        \\## > group
+        \\
+        \\Requires: deploy
+        \\
+    ;
+    const parsed = try parseForTest(arena, src);
+    const root = parsed.root;
+    const deploy = root.find("deploy").?;
+    try testing.expectEqual(@as(usize, 2), deploy.deps.requires.items.len);
+    try testing.expectEqualStrings("test", deploy.deps.requires.items[0]);
+    try testing.expectEqualStrings("build web", deploy.deps.requires.items[1]);
+    try testing.expectEqual(ast.RunDeps.async, deploy.deps.run_deps);
+    try testing.expectEqual(@as(?u32, 2), deploy.deps.jobs);
+    try testing.expect(deploy.deps.run_once);
+    try testing.expectEqualStrings("Ship it", deploy.description);
+    try testing.expect(std.mem.indexOf(u8, deploy.blocks.items[0].code, "Requires: not an attribute") != null);
+
+    const docs = root.find("docs").?;
+    try testing.expectEqual(@as(usize, 1), docs.deps.requires.items.len);
+    try testing.expectEqual(ast.RunDeps.sync, docs.deps.run_deps);
+
+    // A command with only dependencies is a runnable group, not a namespace.
+    const group = root.find("group").?;
+    try testing.expect(group.hasWork());
+    try testing.expectEqual(@as(usize, 0), group.blocks.items.len);
+    try testing.expectEqual(@as(usize, 0), parsed.warnings.items.len);
+}
+
+test "attribute-like prose is left alone and typos are reported" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const src =
+        \\## > a
+        \\
+        \\RunDeps: is described in the manual, see below
+        \\RunDeps: asynch
+        \\
+        \\```sh
+        \\true
+        \\```
+        \\
+    ;
+    const parsed = try parseForTest(arena, src);
+    const a = parsed.root.find("a").?;
+    try testing.expectEqual(ast.RunDeps.sync, a.deps.run_deps);
+    // Only the single-word typo warns; the sentence is prose.
+    try testing.expectEqual(@as(usize, 1), parsed.warnings.items.len);
+    try testing.expect(std.mem.indexOf(u8, parsed.warnings.items[0], "'asynch'") != null);
 }

@@ -46,18 +46,37 @@ pub const CodeBlock = struct {
     line: usize,
 };
 
+pub const RunDeps = enum { sync, async };
+
+/// Dependency attributes of a command (`Requires:`, `RunDeps:`, `Run:`, `Jobs:`).
+pub const DepSpec = struct {
+    /// Raw entries, each a task name followed by its arguments (shell words).
+    requires: std.ArrayList([]const u8) = .empty,
+    run_deps: RunDeps = .sync,
+    /// `Run: once`: when required several times, run a single time per invocation.
+    run_once: bool = false,
+    /// Maximum number of dependencies running at the same time.
+    jobs: ?u32 = null,
+};
+
 pub const Command = struct {
     name: []const u8,
     description: []const u8 = "",
     args: std.ArrayList(Arg) = .empty,
     flags: std.ArrayList(Flag) = .empty,
     blocks: std.ArrayList(CodeBlock) = .empty,
+    deps: DepSpec = .{},
     children: std.ArrayList(*Command) = .empty,
     /// Absolute path of the Markdown file that declared this command.
     source_path: []const u8 = "",
     /// Line of the declaring heading (used to merge several inline tasks
     /// that share one heading).
     decl_line: usize = 0,
+
+    /// A command with neither code nor dependencies is only a namespace.
+    pub fn hasWork(self: *const Command) bool {
+        return self.blocks.items.len > 0 or self.deps.requires.items.len > 0;
+    }
 
     pub fn findIndex(self: *const Command, name: []const u8) ?usize {
         for (self.children.items, 0..) |c, i| {
@@ -88,7 +107,7 @@ pub fn merge(
             continue;
         };
         const existing = into.children.items[idx];
-        if (existing.blocks.items.len == 0 and child.blocks.items.len == 0) {
+        if (!existing.hasWork() and !child.hasWork()) {
             try merge(arena, existing, child, warnings);
             continue;
         }
