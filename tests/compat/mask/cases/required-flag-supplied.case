@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs properly_runs_when_required_option_is_supplied
+input: arguments_and_flags__properly_runs_when_required_option_is_supplied.md
+args: required_val --val december
+stdout-contains: Value: december

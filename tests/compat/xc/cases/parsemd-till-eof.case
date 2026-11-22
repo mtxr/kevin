@@ -1,0 +1,7 @@
+# Source: joerdav/xc parser/parsemd/parsemd_test.go TestParseFileToEOF (listing only, the scripts call go)
+input: parsemd__till-eof.md
+lists: generate-templ
+lists: generate-translations
+lists: generate-all
+output-contains: $KEVIN generate-templ & pids="$pids $!"
+output-contains: ```bash

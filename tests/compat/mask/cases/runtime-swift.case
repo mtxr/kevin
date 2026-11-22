@@ -1,0 +1,7 @@
+# Source: jacobdeichert/mask mask/tests/supported_runtimes_test.rs swift
+input: supported_runtimes__swift.md
+requires: swift
+env: name=World
+args: swift
+stdout-contains: Hello, World!
+xfail: kevin has no swift runtime (the migration reports it)

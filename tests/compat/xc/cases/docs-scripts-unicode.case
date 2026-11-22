@@ -1,0 +1,5 @@
+# Source: joerdav/xc doc/content/task-syntax/scripts.md
+input: docs__scripts.md
+args: Task1
+stdout-contains: Hello 世界!
+stdout-contains: Hello ертөнц!

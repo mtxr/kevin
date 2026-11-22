@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs out_of_choices
+input: arguments_and_flags__out_of_choices.md
+args: color --val YELLOW
+exit: 2
+stderr-contains: RED, BLUE, GREEN
+stdout-not-contains: Value

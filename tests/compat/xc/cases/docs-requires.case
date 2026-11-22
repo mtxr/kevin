@@ -1,0 +1,7 @@
+# Source: joerdav/xc doc/content/task-syntax/requires.md (listing only, the scripts call sh *.sh)
+input: docs__requires.md
+lists: Test
+lists: Lint
+lists: Deploy
+output-contains: $KEVIN Test
+output-contains: $KEVIN Lint

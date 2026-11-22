@@ -1,0 +1,4 @@
+# Source: joerdav/xc parser/parsemd/parsemd_test.go TestCustomHeadingByNextLineMarker (run)
+input: parsemd__marked-heading-next-line.md
+args: hello
+stdout-equals: Hello, world!

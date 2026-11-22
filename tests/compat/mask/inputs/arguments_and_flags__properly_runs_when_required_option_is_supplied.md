@@ -1,0 +1,19 @@
+
+## required_val
+
+**OPTIONS**
+* val
+    * flags: --val
+    * type: string
+    * required
+
+~~~bash
+echo "Value: $val"
+~~~
+
+~~~powershell
+param (
+    $in = $env:val
+)
+Write-Output "Value: $in"
+~~~

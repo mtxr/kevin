@@ -1,0 +1,3 @@
+# Derived from doc/content/task-syntax/run.md: the unsupported attribute is reported
+input: semantics__run-once.md
+notes-contains: `Run: once` is not supported

@@ -1,0 +1,6 @@
+# Source: joerdav/xc doc/content/task-syntax/inputs.md (named inputs from environment variables)
+input: docs__inputs-named.md
+env: FORENAME=Joe SURNAME=Bloggs
+args: greet
+stdout-equals: Hello, Joe Bloggs.
+xfail: Inputs become required (ARG) parameters, so values provided only through the environment are rejected

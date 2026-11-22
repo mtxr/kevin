@@ -1,0 +1,4 @@
+# Source: joerdav/xc parser/parsemd/parsemd_test.go TestRequiresOnlyTask
+input: parsemd__requires-only.md
+lists: a-task
+output-contains: $KEVIN some-task

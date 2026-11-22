@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs errors_when_value_is_not_a_number
+input: arguments_and_flags__errors_when_value_is_not_a_number.md
+args: notanumber --val a234
+exit: 2
+stderr-contains: expected a number
+stdout-not-contains: render

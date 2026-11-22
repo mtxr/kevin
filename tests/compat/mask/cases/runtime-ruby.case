@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/supported_runtimes_test.rs ruby
+input: supported_runtimes__ruby.md
+requires: ruby
+env: name=World
+args: ruby
+stdout-contains: Hello, World!

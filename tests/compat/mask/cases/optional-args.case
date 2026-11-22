@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs runs_with_optional_args
+input: arguments_and_flags__runs_with_optional_args.md
+args: with_opt "I am required" "I am optional"
+stdout-contains: I am required I am optional

@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask README.md "Subcommands" (prefixed)
+input: readme__services-prefixed.md
+args: services stop db
+stdout-contains: Stopping service db

@@ -1,0 +1,7 @@
+# Source: jacobdeichert/mask mask/tests/supported_runtimes_test.rs batch (Windows only)
+input: supported_runtimes__batch.md
+os: windows
+env: name=World
+args: batch
+stdout-contains: Hello, World!
+xfail: kevin does not recognise the "batch" language code used by mask (only bat and cmd)

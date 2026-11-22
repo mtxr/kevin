@@ -74,13 +74,25 @@ $bin --from xc -f examples/maskfile.md -o "$tmp/none.md" 2>/dev/null && { echo "
 echo "smoke: ok"
 ```
 
-## > check
-> Everything CI runs: formatting, unit tests and the smoke test
+## > compat
+> Build, then run the mask/xc compatibility suite in tests/compat (pass/xfail summary)
 
 ```sh
+set -e
+cd "$KEVIN_DIR"
+zig build
+sh tests/compat/run.sh zig-out/bin/kevin
+```
+
+## > check
+> Everything CI runs: formatting, unit tests, the smoke test and the compatibility suite
+
+```sh
+set -e
 $KEVIN fmt-check
 $KEVIN test
 $KEVIN smoke
+$KEVIN compat
 ```
 
 ## > release

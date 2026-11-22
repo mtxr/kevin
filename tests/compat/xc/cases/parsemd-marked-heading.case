@@ -1,0 +1,4 @@
+# Source: joerdav/xc parser/parsemd/parsemd_test.go TestCustomHeadingByNextLineMarker
+input: parsemd__marked-heading-next-line.md
+lists: hello
+not-lists: something

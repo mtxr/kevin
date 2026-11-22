@@ -1,0 +1,9 @@
+# Source: jacobdeichert/mask maskfile.md (mask's own task file); expected/maskfile.md is the reviewed migration
+input: maskfile.md
+output-equals-file: expected/maskfile.md
+lists: run <maskfile_command>
+lists: build
+lists: link
+lists: test
+lists: format
+lists: lint

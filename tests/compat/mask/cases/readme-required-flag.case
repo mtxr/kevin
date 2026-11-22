@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask README.md "Named flags" (required; only the error path is run)
+input: readme__required-flag.md
+args: ping
+exit: 2
+stderr-contains: --domain

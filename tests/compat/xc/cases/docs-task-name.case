@@ -1,0 +1,4 @@
+# Source: joerdav/xc doc/content/task-syntax/task-name.md
+input: docs__task-name.md
+lists: Task_1
+lists: Task-2

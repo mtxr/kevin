@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask README.md "Support for other scripting runtimes" (ruby)
+input: readme__runtimes.md
+requires: ruby
+args: ruby World
+stdout-contains: Hello, World!

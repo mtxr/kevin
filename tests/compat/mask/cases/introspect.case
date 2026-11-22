@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask mask/tests/introspect_test.rs outputs_the_maskfile_structure_as_json
+input: introspect__outputs_the_maskfile_structure_as_json.md
+args: --introspect
+stdout-contains: "somecommand"
+xfail: kevin has no --introspect (JSON dump of the command tree)

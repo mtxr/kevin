@@ -1,0 +1,8 @@
+## Tasks
+### Task1
+Env: ENVIRONMENT=PRODUCTION
+Env: VERSION=1.2
+```
+echo $ENVIRONMENT
+echo $VERSION
+```

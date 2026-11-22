@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask README.md "Getting started" (js block)
+input: readme__getting-started.md
+requires: node
+args: test
+stdout-contains: running tests...

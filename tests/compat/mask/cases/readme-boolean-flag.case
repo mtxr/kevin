@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask README.md "Named flags" (boolean + implicit verbose)
+input: readme__boolean-flag.md
+requires: bash
+args: test -w -v
+stdout-contains: Starting in watch mode...
+stdout-contains: Running with extra logs...

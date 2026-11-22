@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/supported_runtimes_test.rs python
+input: supported_runtimes__python.md
+requires: python3
+env: name=World
+args: python
+stdout-contains: Hello, World!

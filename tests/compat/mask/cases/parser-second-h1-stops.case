@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask-parser/src/parser.rs TEST_MASKFILE: everything after a second H1 is ignored
+input: parser__test_maskfile.md
+not-lists: invalid_cmd
+xfail: mask stops parsing at the second level-1 heading; the migration still converts the headings after it

@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs choices::ignores_the_option_if_not_supplied
+input: arguments_and_flags__choices_ignores_the_option_if_not_supplied.md
+args: color
+stdout-contains: Value: ;

@@ -1,0 +1,4 @@
+# Source: joerdav/xc parser/parsemd/parsemd_test.go TestHeadingCaseInsensitive (task names with spaces are renamed)
+input: parsemd__heading-case.md
+lists: a-task
+notes-contains: renamed to 'a-task'

@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/env_vars_test.rs env_var_mask::set_to_the_correct_value
+input: env_vars__mask_set_to_the_correct_value.md
+run-in: elsewhere
+args: run
+stdout-contains: --file /
+stdout-contains: migrated.md

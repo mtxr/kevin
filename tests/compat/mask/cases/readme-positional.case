@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask README.md "Positional arguments"
+input: readme__positional.md
+args: test a.rs case1
+stdout-contains: Testing case1 in a.rs

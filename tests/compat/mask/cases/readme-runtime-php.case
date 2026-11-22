@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask README.md "Support for other scripting runtimes" (php)
+input: readme__runtimes.md
+requires: php
+args: php World
+stdout-contains: Hello, World!

@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs named_flags
+input: arguments_and_flags__named_flags.md
+requires: bash
+args: serve --port 1234
+stdout-equals: 1234

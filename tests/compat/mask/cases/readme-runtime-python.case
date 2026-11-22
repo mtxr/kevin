@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask README.md "Support for other scripting runtimes" (python)
+input: readme__runtimes.md
+requires: python3
+args: python World
+stdout-contains: Hello, World!

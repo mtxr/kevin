@@ -1,0 +1,8 @@
+# Source: joerdav/xc parser/parsemd/parsemd_test.go TestParseFile (testdata/example.md, setext "tasks" heading)
+input: parsemd__example.md
+lists: list
+lists: list2
+lists: hello <FOO> <BAR>
+lists: all-lists
+not-lists: something
+xfail: setext headings ("tasks" underlined with ---) are not recognised, so the migration finds no Tasks section

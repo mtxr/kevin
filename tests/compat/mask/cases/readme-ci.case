@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask README.md "Inherits the script's exit code"
+input: readme__ci.md
+output-contains: $KEVIN test \
+output-contains: && $KEVIN lint \
+output-contains: && $KEVIN format --check

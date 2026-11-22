@@ -1,0 +1,6 @@
+# Source: joerdav/xc doc/content/task-syntax/scripts.md (shebang)
+input: docs__scripts-shebang.md
+requires: python3
+args: python-task
+stdout-equals: foo
+output-contains: ```python

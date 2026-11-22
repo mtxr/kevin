@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/subcommands_test.rs positional_arguments
+input: subcommands__positional_arguments.md
+args: services start my_fancy_service
+stdout-contains: Starting service my_fancy_service

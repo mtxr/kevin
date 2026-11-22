@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/supported_runtimes_test.rs powershell (Windows only)
+input: supported_runtimes__powershell.md
+os: windows
+env: name=World
+args: powershell
+stdout-contains: Hello, World!

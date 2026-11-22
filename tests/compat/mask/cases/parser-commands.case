@@ -1,0 +1,7 @@
+# Source: jacobdeichert/mask mask-parser/src/parser.rs TEST_MASKFILE / parses_the_maskfile_structure
+input: parser__test_maskfile.md
+lists: serve <port>
+lists: node <name>
+lists: parent subcommand
+lists: multi <required> [optional]
+output-contains: # Document Title

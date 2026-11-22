@@ -1,0 +1,4 @@
+# Source: joerdav/xc parser/parsemd/parsemd.go: "rundependencies" is an alias of "rundeps"
+input: docs__run-deps.md
+output-not-contains: RunDependencies
+xfail: the RunDependencies attribute name is not recognised and ends up in the description

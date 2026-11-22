@@ -1,0 +1,4 @@
+# Source: joerdav/xc doc/content/task-syntax/directory.md (Directory: $PWD)
+input: docs__directory-pwd.md
+output-not-contains: cd "
+notes-contains: already kevin's default

@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/supported_runtimes_test.rs custom_not_found_error_if_program_not_found
+input: supported_runtimes__custom_not_found_error_if_program_not_found.md
+args: missing
+exit: 1
+stderr-contains: notfound
+xfail: kevin ignores unknown languages ("no runnable code block") instead of reporting the missing 'notfound' program like mask does

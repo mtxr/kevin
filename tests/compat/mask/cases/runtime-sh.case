@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/supported_runtimes_test.rs sh
+input: supported_runtimes__sh.md
+requires: sh
+env: name=World
+args: sh
+stdout-contains: Hello, World!

@@ -1,0 +1,3 @@
+# Source: jacobdeichert/mask README.md "Windows support" (listing only, the script runs cargo)
+input: readme__windows-link.md
+lists: link

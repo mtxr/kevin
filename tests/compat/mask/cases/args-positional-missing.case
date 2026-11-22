@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs positional_arguments (second assertion)
+input: arguments_and_flags__positional_arguments.md
+args: test some_test_case
+exit: 2
+stderr-contains: test_case

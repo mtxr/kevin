@@ -1,0 +1,4 @@
+# Source: joerdav/xc doc/content/task-syntax/inputs.md (named inputs as arguments)
+input: docs__inputs-named.md
+args: greet Joe Bloggs
+stdout-equals: Hello, Joe Bloggs.

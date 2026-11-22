@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask README.md "Named flags" (type: number)
+input: readme__number-flag.md
+args: purchase 10 -t 3
+stdout-contains: Total: 30

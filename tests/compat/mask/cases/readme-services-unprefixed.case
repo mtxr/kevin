@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask README.md "Subcommands" (unprefixed)
+input: readme__services-unprefixed.md
+args: services start db
+stdout-contains: Starting service db

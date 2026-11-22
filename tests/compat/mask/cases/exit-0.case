@@ -1,0 +1,3 @@
+# Source: jacobdeichert/mask mask/tests/integration_test.rs exits_with_success
+input: integration__exits_with_success.md
+args: success

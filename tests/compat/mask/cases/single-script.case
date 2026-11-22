@@ -1,0 +1,5 @@
+# Derived from mask-parser/src/parser.rs: a command keeps only one script (the last code block)
+input: derived__single-script.md
+args: deploy
+stdout-equals: deploying
+xfail: kevin runs every code block of a command in sequence, mask runs only one (the last non-Windows block)

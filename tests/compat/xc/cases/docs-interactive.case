@@ -1,0 +1,5 @@
+# Source: joerdav/xc doc/content/task-syntax/interactive.md (deprecated, no effect)
+input: docs__interactive.md
+args: configure
+stdout-equals: configured
+output-not-contains: interactive

@@ -1,0 +1,5 @@
+# Source: joerdav/xc doc/content/task-syntax/run-deps.md (build-js/build-css added so the example runs)
+input: docs__run-deps.md
+args: build-all
+stdout-contains: js
+stdout-contains: css

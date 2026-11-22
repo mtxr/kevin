@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs named_flags (verbose is always available)
+input: arguments_and_flags__named_flags.md
+requires: bash
+args: serve --port 1234 --verbose
+stdout-contains: Starting an http server on PORT: 1234

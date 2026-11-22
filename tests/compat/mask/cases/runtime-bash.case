@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/supported_runtimes_test.rs bash
+input: supported_runtimes__bash.md
+requires: bash
+env: name=World
+args: bash
+stdout-contains: Hello, World!

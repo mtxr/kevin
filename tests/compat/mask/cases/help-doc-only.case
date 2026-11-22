@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/integration_test.rs specifying_a_maskfile_in_a_different_dir
+input: integration__specifying_a_maskfile_in_a_different_dir.md
+args: --help
+stdout-contains: Usage:

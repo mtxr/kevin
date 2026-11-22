@@ -1,0 +1,3 @@
+# Source: jacobdeichert/mask README.md "Support for other scripting runtimes" (swift is reported)
+input: readme__runtimes.md
+notes-contains: swift

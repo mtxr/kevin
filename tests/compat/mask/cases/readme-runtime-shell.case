@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask README.md "Support for other scripting runtimes" (shell)
+input: readme__runtimes.md
+requires: zsh
+args: shell World
+stdout-contains: Hello, World!

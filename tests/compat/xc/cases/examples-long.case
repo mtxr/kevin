@@ -1,0 +1,6 @@
+# Source: joerdav/xc examples/long/README.md
+input: examples_long.md
+args: Task40
+stdout-equals: Task40
+lists: Task1
+lists: Task40

@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask README.md "Getting started"
+input: readme__getting-started.md
+args: build
+stdout-contains: building project...

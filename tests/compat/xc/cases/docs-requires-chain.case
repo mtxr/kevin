@@ -1,0 +1,4 @@
+# Source: joerdav/xc doc/content/task-syntax/requires.md (chaining)
+input: docs__requires-chain.md
+args: Task3
+stdout-equals: TASK 1\nTASK 2\nTASK 3

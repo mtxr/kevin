@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/subcommands_test.rs subcommand_works
+input: subcommands__subcommand_works.md
+args: services start all
+stdout-contains: Start all services

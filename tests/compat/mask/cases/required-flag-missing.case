@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs errors_when_val_is_not_supplied
+input: arguments_and_flags__errors_when_val_is_not_supplied.md
+args: required_val
+exit: 2
+stderr-contains: missing required flag --val
+stdout-not-contains: render

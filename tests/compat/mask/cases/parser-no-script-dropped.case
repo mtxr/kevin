@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask-parser/src/parser.rs TEST_MASKFILE: no_script has no code block and is not a command
+input: parser__test_maskfile.md
+not-lists: no_script
+xfail: the migration turns every heading into a command, even documentation headings without code (mask drops them)

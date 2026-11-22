@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/supported_runtimes_test.rs cmd (Windows only)
+input: supported_runtimes__cmd.md
+os: windows
+env: name=World
+args: cmd
+stdout-contains: Hello, World!

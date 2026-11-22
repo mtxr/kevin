@@ -1,0 +1,4 @@
+# Source: joerdav/xc doc/content/task-syntax/environment-variables.md (several Env lines)
+input: docs__env-multiline.md
+args: Task1
+stdout-equals: PRODUCTION\n1.2

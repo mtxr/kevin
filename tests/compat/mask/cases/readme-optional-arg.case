@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask README.md "Positional arguments" (optional)
+input: readme__optional-arg.md
+requires: bash
+args: test
+stdout-contains: Running all tests

@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/env_vars_test.rs env_var_mask::works_from_any_dir
+input: env_vars__works_from_any_dir.md
+run-in: elsewhere
+args: ci
+stdout-contains: tests passed
+output-contains: $KEVIN test

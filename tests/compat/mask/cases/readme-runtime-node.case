@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask README.md "Support for other scripting runtimes" (node)
+input: readme__runtimes.md
+requires: node
+args: node World
+stdout-contains: Hello, World!

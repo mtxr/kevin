@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask mask/tests/subcommands_test.rs exits_with_error_when_missing_subcommand
+input: subcommands__exits_with_error_when_missing_subcommand.md
+args: service
+exit: 1
+xfail: kevin prints the namespace help and exits 0 when a subcommand is missing; mask exits 1 with an error

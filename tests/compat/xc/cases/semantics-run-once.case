@@ -1,0 +1,5 @@
+# Derived from doc/content/task-syntax/run.md: a run-once task runs a single time per invocation
+input: semantics__run-once.md
+args: b
+stdout-equals: setup-ran\na\nb
+xfail: Run: once is not supported; setup runs twice

@@ -1,0 +1,4 @@
+# Source: joerdav/xc doc/content/task-syntax/directory.md
+input: docs__directory.md
+lists: Build
+output-contains: cd "$KEVIN_DIR/src"

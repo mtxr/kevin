@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/supported_runtimes_test.rs node
+input: supported_runtimes__node.md
+requires: node
+env: name=World
+args: node
+stdout-contains: Hello, World!

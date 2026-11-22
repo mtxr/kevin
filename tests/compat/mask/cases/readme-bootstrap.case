@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask README.md "Running mask from within a script"
+input: readme__bootstrap.md
+output-contains: $KEVIN install
+output-contains: $KEVIN db migrate
+output-not-contains: mask build

@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/integration_test.rs exits_with_error1
+input: integration__exits_with_error1.md
+args: failure
+exit: 1

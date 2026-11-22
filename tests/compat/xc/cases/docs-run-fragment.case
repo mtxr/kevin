@@ -1,0 +1,3 @@
+# Source: joerdav/xc doc/content/task-syntax/run.md (fragment without a Tasks heading: rejected like xc does)
+input: docs__run-once.md
+migrate-exit: 2

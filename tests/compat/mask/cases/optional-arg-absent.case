@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs does_not_fail_when_optional_arg_is_not_present
+input: arguments_and_flags__does_not_fail_when_optional_arg_is_not_present.md
+args: with_opt "I am required"
+stdout-not-contains: I am optional

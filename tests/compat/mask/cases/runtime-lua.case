@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/supported_runtimes_test.rs lua
+input: supported_runtimes__lua.md
+requires: lua
+env: name=World
+args: lua
+stdout-contains: Hello, World!

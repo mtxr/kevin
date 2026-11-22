@@ -1,0 +1,6 @@
+# Derived from doc/content/task-syntax/directory.md: tasks run in the README's directory by default
+input: semantics__default-dir.md
+run-in: sub
+args: where
+stdout-equals: runs in the file directory
+xfail: migrated tasks run in the current directory unless Directory is set (the migration prints a note)

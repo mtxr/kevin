@@ -1,0 +1,6 @@
+# Source: joerdav/xc doc/content/task-syntax/index.md (listing only)
+input: docs__index-deploy.md
+lists: deploy
+output-contains: $KEVIN test
+output-contains: cd "$KEVIN_DIR/deployment"
+output-contains: export ENVIRONMENT='STAGING'

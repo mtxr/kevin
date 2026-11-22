@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask mask/tests/env_vars_test.rs env_var_maskfile_dir::set_to_the_correct_value
+input: env_vars__maskfile_dir_set_to_the_correct_value.md
+run-in: elsewhere
+args: run
+stdout-contains: maskfile_dir = /

@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask README.md "Named flags" (help only: the script starts a web server)
+input: readme__named-flag.md
+args: serve --help
+stdout-contains: -p, --port <STRING>

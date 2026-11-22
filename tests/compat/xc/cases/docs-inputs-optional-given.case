@@ -1,0 +1,4 @@
+# Source: joerdav/xc doc/content/task-syntax/inputs.md (optional input given)
+input: docs__inputs-optional.md
+args: greet Joe
+stdout-equals: Hello, Joe.

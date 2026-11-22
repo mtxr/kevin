@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs properly_validates_decimal_numbers
+input: arguments_and_flags__properly_validates_decimal_numbers.md
+args: decimal --val 123.3456789
+stdout-contains: Value: 123.3456789

@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs positional_arguments
+input: arguments_and_flags__positional_arguments.md
+args: test the_file some_test_case
+stdout-contains: Testing some_test_case in the_file

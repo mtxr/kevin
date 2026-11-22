@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs numerical_option_flag::ignores_the_option_if_not_supplied
+input: arguments_and_flags__number_ignores_the_option_if_not_supplied.md
+args: nooption
+stdout-contains: No arg this time

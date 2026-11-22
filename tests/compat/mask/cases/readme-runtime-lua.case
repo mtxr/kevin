@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask README.md "Support for other scripting runtimes" (lua)
+input: readme__runtimes.md
+requires: lua
+args: lua World
+stdout-contains: Hello, World!

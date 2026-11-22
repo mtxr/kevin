@@ -1,0 +1,5 @@
+# Source: joerdav/xc doc/content/task-syntax/inputs.md (positional $1)
+input: docs__inputs-positional.md
+args: greet Joe
+stdout-equals: Hello, Joe.
+xfail: kevin does not pass arguments as $1..$n and rejects undeclared arguments (the migration only reports it)

@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs properly_validates_flag_with_choices
+input: arguments_and_flags__properly_validates_flag_with_choices.md
+args: color --val RED
+stdout-contains: Value: RED

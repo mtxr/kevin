@@ -1,0 +1,4 @@
+# Source: joerdav/xc doc/content/task-syntax/environment-variables.md (comma separated)
+input: docs__env-comma.md
+args: Task1
+stdout-equals: PRODUCTION\n1.2

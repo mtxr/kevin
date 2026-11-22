@@ -1,0 +1,4 @@
+# Derived: `mask` after the shell keyword `if` is a command call (mask README "Running mask from within a script")
+input: derived__rewrite-keywords.md
+output-contains: if $KEVIN test; then
+xfail: the mask-call rewrite only knows then/do/else and & | ; ( as command positions, not if/while/until/!/time/exec

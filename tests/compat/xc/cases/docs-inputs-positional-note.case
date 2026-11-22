@@ -1,0 +1,3 @@
+# Source: joerdav/xc doc/content/task-syntax/inputs.md (positional usage is reported)
+input: docs__inputs-positional.md
+notes-contains: positional parameters

@@ -1,0 +1,5 @@
+# Derived from mask/tests/env_vars_test.rs: PowerShell blocks read $env:MASK.
+input: derived__powershell-env.md
+output-contains: $env:KEVIN
+output-not-contains: $env:MASK
+xfail: the migration only rewrites $MASK / $MASKFILE_DIR, not PowerShell's $env:MASK / $env:MASKFILE_DIR

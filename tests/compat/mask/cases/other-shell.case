@@ -1,0 +1,6 @@
+# Derived from mask/src/executor.rs: any other lang code is run as "<lang> -c <source>"
+input: derived__other-shell.md
+requires: dash
+args: d
+stdout-contains: via dash
+xfail: kevin only runs a fixed list of languages; mask runs any executor that accepts -c (dash, ksh, ...)

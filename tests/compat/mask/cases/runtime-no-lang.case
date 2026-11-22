@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/supported_runtimes_test.rs errors_when_no_lang_code_is_specified
+input: supported_runtimes__errors_when_no_lang_code_is_specified.md
+args: missing
+exit: 1

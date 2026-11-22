@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask README.md "Documentation sections"
+input: readme__documentation-section.md
+not-lists: This-is-a-heading-with-no-script
+xfail: headings without code are documentation in mask; the migration renames them and makes them commands

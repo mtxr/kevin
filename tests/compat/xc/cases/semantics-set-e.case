@@ -1,0 +1,6 @@
+# Derived from run/run.go: xc prefixes every script with "set -e"
+input: semantics__shell.md
+args: strict
+exit: 1
+stdout-not-contains: should not print
+xfail: migrated scripts do not stop at the first failing command (no set -e)

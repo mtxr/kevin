@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask mask/tests/subcommands_test.rs exits_with_error_when_it_has_no_script_lang_code
+input: subcommands__exits_with_error_when_it_has_no_script_lang_code.md
+args: start
+exit: 1
+stdout-not-contains: system, online

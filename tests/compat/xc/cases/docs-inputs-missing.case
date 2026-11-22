@@ -1,0 +1,5 @@
+# Source: joerdav/xc doc/content/task-syntax/inputs.md (missing inputs are an error)
+input: docs__inputs-named.md
+args: greet
+exit: 2
+stderr-contains: FORENAME

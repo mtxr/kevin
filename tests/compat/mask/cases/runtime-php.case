@@ -1,0 +1,6 @@
+# Source: jacobdeichert/mask mask/tests/supported_runtimes_test.rs php
+input: supported_runtimes__php.md
+requires: php
+env: name=World
+args: php
+stdout-contains: Hello, World!

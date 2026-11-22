@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs shows_the_correct_version_for_the_root_command
+input: arguments_and_flags__shows_the_correct_version_for_the_root_command.md
+args: --version
+stdout-contains: kevin 

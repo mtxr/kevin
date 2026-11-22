@@ -1,0 +1,4 @@
+# Source: joerdav/xc parser/parsemd/parsemd_test.go TestParseFileNoTasks
+input: parsemd__notasks.md
+migrate-exit: 2
+notes-contains: no 'Tasks' heading

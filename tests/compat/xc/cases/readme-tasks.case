@@ -1,0 +1,11 @@
+# Source: joerdav/xc README.md (xc's own tasks; listing only, nothing is executed)
+input: readme.md
+lists: test
+lists: lint
+lists: build
+lists: tag <VERSION>
+lists: update-nix
+lists: install-hugo
+lists: run-docs
+lists: build-docs
+output-contains: cd "$KEVIN_DIR/doc"

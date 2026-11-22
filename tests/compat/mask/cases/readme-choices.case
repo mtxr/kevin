@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask README.md "Named flags" (choices)
+input: readme__choices.md
+requires: bash
+args: color -c BLUE
+stdout-contains: Color selected = 'BLUE'

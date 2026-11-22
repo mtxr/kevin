@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask-parser/src/parser.rs TEST_MASKFILE (multi command)
+input: parser__test_maskfile.md
+args: multi req opt
+stdout-equals: This is optional - opt\nThis is required - req

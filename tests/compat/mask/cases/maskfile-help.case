@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask maskfile.md: flags survive the migration (help only, nothing is executed)
+input: maskfile.md
+args: test --help
+stdout-contains: -f, --file <STRING>
+stdout-contains: Run all tests

@@ -1,0 +1,5 @@
+# Source: joerdav/xc doc/content/task-syntax/inputs.md (variadic $@)
+input: docs__inputs-variadic.md
+args: greet-everyone Joe Bob Steve
+stdout-equals: Hello, Joe Bob Steve.
+xfail: kevin has no variadic arguments

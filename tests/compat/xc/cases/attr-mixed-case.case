@@ -1,0 +1,5 @@
+# Source: joerdav/xc parser/parsemd/parsemd_test.go TestParseAttribute (mixed-case attribute names)
+input: parsemd__attributes.md
+args: mixed
+stdout-equals: somevar=[]\nmode=fast
+xfail: depends on attr-env-formatting: the required task 'hello' fails to run

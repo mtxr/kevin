@@ -1,0 +1,4 @@
+# Source: joerdav/xc doc/content/task-syntax/inputs.md (optional input with an Environment default)
+input: docs__inputs-optional.md
+args: greet
+stdout-equals: Hello, World.

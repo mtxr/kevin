@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs properly_validates_negative_numbers
+input: arguments_and_flags__properly_validates_negative_numbers.md
+args: negative --val -123
+stdout-contains: Value: -123

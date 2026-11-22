@@ -1,0 +1,5 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs exits_with_error_when_subcommand_has_version_flag
+input: arguments_and_flags__exits_with_error_when_subcommand_has_version_flag.md
+args: foo --version
+exit: 2
+stderr-contains: --version

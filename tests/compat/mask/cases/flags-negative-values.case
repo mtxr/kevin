@@ -1,0 +1,4 @@
+# Source: jacobdeichert/mask mask/tests/arguments_and_flags_test.rs allows_entering_negative_numbers_as_flag_values
+input: arguments_and_flags__allows_entering_negative_numbers_as_flag_values.md
+args: add --a -33 --b 17
+stdout-contains: -16
