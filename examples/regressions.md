@@ -23,3 +23,10 @@ echo after
 ```sh
 echo "watch_mode=${watch_mode:-unset}"
 ```
+
+## > optional-arg [name]
+> An absent optional argument is empty, never inherited from the environment
+
+```sh
+echo "name=[$name]"
+```

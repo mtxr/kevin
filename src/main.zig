@@ -8,6 +8,7 @@ const runner = @import("runner.zig");
 const migrate = @import("migrate.zig");
 const explain = @import("explain.zig");
 const deps = @import("deps.zig");
+const introspect = @import("introspect.zig");
 const build_options = @import("build_options");
 
 test {
@@ -18,6 +19,7 @@ test {
     _ = migrate;
     _ = explain;
     _ = deps;
+    _ = introspect;
 }
 
 const default_files = [_][]const u8{ "readme.md", "tasks.md", "build.md" };
@@ -61,6 +63,7 @@ pub fn main(init: std.process.Init) !u8 {
     var from_arg: ?[]const u8 = null;
     var output_arg: ?[]const u8 = null;
     var explain_flag = false;
+    var introspect_flag = false;
     var jobs_arg: ?[]const u8 = null;
     var tokens: std.ArrayList([]const u8) = .empty;
     var i: usize = 1;
@@ -84,6 +87,8 @@ pub fn main(init: std.process.Init) !u8 {
             jobs_arg = argv[i];
         } else if (std.mem.startsWith(u8, a, "--jobs=")) {
             jobs_arg = a["--jobs=".len..];
+        } else if (std.mem.eql(u8, a, "--introspect")) {
+            introspect_flag = true;
         } else if (std.mem.eql(u8, a, "--explain")) {
             explain_flag = true;
         } else if (std.mem.eql(u8, a, "--from")) {
@@ -151,6 +156,12 @@ pub fn main(init: std.process.Init) !u8 {
             return 0;
         }
         return fail("no README.md, tasks.md or build.md found in the current directory (use --file <path>)", .{});
+    }
+
+    if (introspect_flag) {
+        try introspect.write(arena, out, root, sources.items, build_options.version);
+        try out.flush();
+        return 0;
     }
 
     const resolved = try cli.resolve(arena, root, tokens.items);

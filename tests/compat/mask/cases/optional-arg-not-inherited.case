@@ -4,4 +4,3 @@ input: arguments_and_flags__does_not_fail_when_optional_arg_is_not_present.md
 env: optional=LEAKED
 args: with_opt "I am required"
 stdout-not-contains: LEAKED
-xfail: kevin leaves an absent optional argument unset, so a same-named variable from the parent environment (or from a calling task via $KEVIN) leaks into the script

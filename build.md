@@ -102,6 +102,14 @@ msg=$(cd "$tmp/empty" && "$OLDPWD/$bin" build 2>&1)
 set -e
 case "$msg" in *'no README.md, tasks.md or build.md found'*) ;; *) echo "smoke: wrong message without task files: $msg"; exit 1 ;; esac
 
+# An absent optional argument is empty even when the caller's environment sets it.
+[ "$(name=Bob $bin -f examples/regressions.md optional-arg)" = "name=[]" ] || { echo "smoke: optional argument leaked from the environment"; exit 1; }
+[ "$(name=Bob $bin -f examples/regressions.md optional-arg claude)" = "name=[claude]" ] || { echo "smoke: optional argument not passed"; exit 1; }
+
+# --introspect prints the command tree as JSON.
+intro=$($bin -f examples/tasks.md --introspect)
+case "$intro" in *'"name": "hello"'*'"required": true'*) ;; *) echo "smoke: introspect output mismatch"; exit 1 ;; esac
+
 # --explain describes a command without running it; --version prints the version.
 exp=$($bin -f examples/tasks.md --explain hello World -t 2)
 case "$exp" in *'name (required) = World'*'argv:    bash -c <code>'*) ;; *) echo "smoke: explain output mismatch"; exit 1 ;; esac

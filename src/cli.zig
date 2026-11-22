@@ -168,6 +168,10 @@ pub fn parseInvocation(
         } else if (a.required) {
             err_msg.* = try std.fmt.allocPrint(arena, "missing required argument <{s}>", .{a.name});
             return error.Usage;
+        } else {
+            // An absent optional argument is empty, so a variable of the same name
+            // inherited from the caller (or from a task calling `$KEVIN`) cannot leak in.
+            try env.append(arena, .{ .name = a.name, .value = "" });
         }
     }
 
@@ -302,6 +306,7 @@ pub fn printRootHelp(arena: Allocator, w: *Io.Writer, root: *const Command, sour
         .{ .left = "    --from <mask|xc>", .right = "Convert a mask/xc file to kevin syntax (stdout, or -o)" },
         .{ .left = "-o, --output <PATH>", .right = "With --from: write the result to a new file" },
         .{ .left = "-j, --jobs <N>", .right = "Max scripts running at once (default: CPU count, or $KEVIN_JOBS)" },
+        .{ .left = "    --introspect", .right = "Print the command tree as JSON" },
         .{ .left = "    --explain", .right = "Show how the command resolves and what would run, without running it" },
         .{ .left = "-V, --version", .right = "Print the kevin version" },
         .{ .left = "-h, --help", .right = "Print help" },
@@ -419,7 +424,7 @@ test "resolve nested commands and parse args/flags" {
     var msg: []const u8 = "";
     const inv = try parseInvocation(arena, r.cmd, r.rest, &msg);
     try testing.expectEqualStrings("web", lookup(inv, "target").?);
-    try testing.expect(lookup(inv, "extra") == null);
+    try testing.expectEqualStrings("", lookup(inv, "extra").?);
     try testing.expectEqualStrings("8080", lookup(inv, "port").?);
     try testing.expectEqualStrings("dev", lookup(inv, "env").?);
     try testing.expectEqualStrings("true", lookup(inv, "watch").?);

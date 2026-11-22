@@ -75,7 +75,7 @@ pub fn print(w: *Io.Writer, info: Info) Io.Writer.Error!void {
         for (cmd.args.items) |a| {
             try w.print("  {s} ({s}) = ", .{ a.name, if (a.required) "required" else "optional" });
             if (lookup(info.invocation.env, a.name)) |v| {
-                try w.print("{s}\n", .{v});
+                if (v.len == 0) try w.writeAll("(empty)\n") else try w.print("{s}\n", .{v});
             } else try w.writeAll("(not set)\n");
         }
     }
