@@ -299,6 +299,8 @@ pub fn printRootHelp(arena: Allocator, w: *Io.Writer, root: *const Command, sour
     try w.writeAll("Options:\n");
     try printRows(w, &.{
         .{ .left = "-f, --file <PATH>", .right = "Use a specific Markdown file" },
+        .{ .left = "    --from <mask|xc>", .right = "Convert a mask/xc file to kevin syntax (stdout, or -o)" },
+        .{ .left = "-o, --output <PATH>", .right = "With --from: write the result to a new file" },
         .{ .left = "-h, --help", .right = "Print help" },
         .{ .left = "-v, --verbose", .right = "Echo each code block before running it" },
     });

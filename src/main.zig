@@ -5,12 +5,14 @@ const ast = @import("ast.zig");
 const parser = @import("parser.zig");
 const cli = @import("cli.zig");
 const runner = @import("runner.zig");
+const migrate = @import("migrate.zig");
 
 test {
     _ = ast;
     _ = parser;
     _ = cli;
     _ = runner;
+    _ = migrate;
 }
 
 const default_files = [_][]const u8{ "readme.md", "tasks.md", "build.md" };
@@ -51,6 +53,8 @@ pub fn main(init: std.process.Init) !u8 {
 
     // Global flags are only recognised before the command name.
     var file_arg: ?[]const u8 = null;
+    var from_arg: ?[]const u8 = null;
+    var output_arg: ?[]const u8 = null;
     var tokens: std.ArrayList([]const u8) = .empty;
     var i: usize = 1;
     while (i < argv.len) : (i += 1) {
@@ -61,6 +65,18 @@ pub fn main(init: std.process.Init) !u8 {
             file_arg = argv[i];
         } else if (std.mem.startsWith(u8, a, "--file=")) {
             file_arg = a["--file=".len..];
+        } else if (std.mem.eql(u8, a, "--from")) {
+            i += 1;
+            if (i >= argv.len) return fail("--from requires 'mask' or 'xc'", .{});
+            from_arg = argv[i];
+        } else if (std.mem.startsWith(u8, a, "--from=")) {
+            from_arg = a["--from=".len..];
+        } else if (std.mem.eql(u8, a, "-o") or std.mem.eql(u8, a, "--output")) {
+            i += 1;
+            if (i >= argv.len) return fail("{s} requires a path", .{a});
+            output_arg = argv[i];
+        } else if (std.mem.startsWith(u8, a, "--output=")) {
+            output_arg = a["--output=".len..];
         } else if (a.len > 0 and a[0] == '-') {
             try tokens.append(arena, a);
         } else {
@@ -68,6 +84,12 @@ pub fn main(init: std.process.Init) !u8 {
             break;
         }
     }
+
+    if (from_arg) |from| {
+        if (tokens.items.len > 0) return fail("--from does not take a command (got '{s}')", .{tokens.items[0]});
+        return runMigration(arena, io, from, file_arg, output_arg);
+    }
+    if (output_arg != null) return fail("--output is only valid together with --from", .{});
 
     var names: []const []const u8 = undefined;
     if (file_arg) |f| {
@@ -159,4 +181,45 @@ pub fn main(init: std.process.Init) !u8 {
 
 fn children(cmd: *const ast.Command) bool {
     return cmd.children.items.len > 0 or cmd.name.len == 0;
+}
+
+/// `kevin --from mask|xc [-f input.md] [-o output.md]`: converts a foreign
+/// file to kevin syntax. Writes to stdout unless `-o` is given; never
+/// overwrites an existing file.
+fn runMigration(
+    arena: std.mem.Allocator,
+    io: Io,
+    from: []const u8,
+    file_arg: ?[]const u8,
+    output_arg: ?[]const u8,
+) !u8 {
+    const source = migrate.Source.parse(from) orelse
+        return fail("unknown source '{s}' for --from (expected 'mask' or 'xc')", .{from});
+    const path = file_arg orelse source.defaultFile();
+    const text = Io.Dir.cwd().readFileAlloc(io, path, arena, .limited(max_file_size)) catch |err|
+        return fail("cannot read '{s}': {t}", .{ path, err });
+
+    const result = migrate.migrate(arena, source, text) catch |err| switch (err) {
+        error.NoTasksSection => return fail("'{s}' has no 'Tasks' heading (xc needs one; see https://xcfile.dev)", .{path}),
+        error.OutOfMemory => return err,
+    };
+
+    if (output_arg) |out_path| {
+        var file = Io.Dir.cwd().createFile(io, out_path, .{ .exclusive = true }) catch |err| switch (err) {
+            error.PathAlreadyExists => return fail("'{s}' already exists; refusing to overwrite it", .{out_path}),
+            else => return fail("cannot create '{s}': {t}", .{ out_path, err }),
+        };
+        defer file.close(io);
+        var buf: [4096]u8 = undefined;
+        var w = file.writer(io, &buf);
+        try w.interface.writeAll(result.output);
+        try w.interface.flush();
+    } else {
+        var buf: [4096]u8 = undefined;
+        var w = Io.File.stdout().writer(io, &buf);
+        try w.interface.writeAll(result.output);
+        try w.interface.flush();
+    }
+    for (result.notes) |n| std.debug.print("kevin: note: {s}\n", .{n});
+    return 0;
 }
