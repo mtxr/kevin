@@ -7,6 +7,7 @@ const cli = @import("cli.zig");
 const runner = @import("runner.zig");
 const migrate = @import("migrate.zig");
 const explain = @import("explain.zig");
+const deps = @import("deps.zig");
 const build_options = @import("build_options");
 
 test {
@@ -16,6 +17,7 @@ test {
     _ = runner;
     _ = migrate;
     _ = explain;
+    _ = deps;
 }
 
 const default_files = [_][]const u8{ "readme.md", "tasks.md", "build.md" };
@@ -59,6 +61,7 @@ pub fn main(init: std.process.Init) !u8 {
     var from_arg: ?[]const u8 = null;
     var output_arg: ?[]const u8 = null;
     var explain_flag = false;
+    var jobs_arg: ?[]const u8 = null;
     var tokens: std.ArrayList([]const u8) = .empty;
     var i: usize = 1;
     while (i < argv.len) : (i += 1) {
@@ -75,6 +78,12 @@ pub fn main(init: std.process.Init) !u8 {
             try w.interface.print("kevin {s}\n", .{build_options.version});
             try w.interface.flush();
             return 0;
+        } else if (std.mem.eql(u8, a, "-j") or std.mem.eql(u8, a, "--jobs")) {
+            i += 1;
+            if (i >= argv.len) return fail("{s} requires a number", .{a});
+            jobs_arg = argv[i];
+        } else if (std.mem.startsWith(u8, a, "--jobs=")) {
+            jobs_arg = a["--jobs=".len..];
         } else if (std.mem.eql(u8, a, "--explain")) {
             explain_flag = true;
         } else if (std.mem.eql(u8, a, "--from")) {
@@ -139,7 +148,7 @@ pub fn main(init: std.process.Init) !u8 {
     var msg: []const u8 = "";
 
     // A namespace (no code of its own) followed by a stray word is a typo, not an argument.
-    if (resolved.cmd.blocks.items.len == 0 and resolved.cmd.children.items.len > 0) {
+    if (!resolved.cmd.hasWork() and resolved.cmd.children.items.len > 0) {
         for (resolved.rest) |t| {
             if (t.len > 0 and t[0] != '-') {
                 std.debug.print("kevin: unknown command '{s}'\n", .{t});
@@ -153,7 +162,7 @@ pub fn main(init: std.process.Init) !u8 {
             usage_error = msg;
             if (explain_flag) break :blk cli.Invocation{};
             std.debug.print("kevin: {s}\n", .{msg});
-            if (resolved.cmd != root and resolved.cmd.blocks.items.len == 0 and resolved.cmd.children.items.len > 0) {
+            if (resolved.cmd != root and !resolved.cmd.hasWork() and resolved.cmd.children.items.len > 0) {
                 std.debug.print("Run 'kevin {s} --help' to list subcommands.\n", .{try std.mem.join(arena, " ", resolved.path)});
             } else {
                 std.debug.print("Run 'kevin {s}{s}--help' for usage.\n", .{
@@ -167,7 +176,7 @@ pub fn main(init: std.process.Init) !u8 {
     };
 
     const is_root = resolved.cmd == root;
-    const no_code = resolved.cmd.blocks.items.len == 0;
+    const no_code = !resolved.cmd.hasWork();
     // A namespace (or the root) with nothing runnable prints help; a bad name is an error.
     if (!explain_flag and (inv.help or is_root or no_code)) {
         if (is_root) {
@@ -179,42 +188,70 @@ pub fn main(init: std.process.Init) !u8 {
         return if (inv.help or children(resolved.cmd)) 0 else 1;
     }
 
-    // Variables kevin adds to the inherited environment.
-    const md_path = resolved.cmd.source_path;
-    var injected: std.ArrayList(cli.EnvPair) = .empty;
-    try injected.appendSlice(arena, inv.env);
-    const exe = try std.process.executablePathAlloc(io, arena);
-    try injected.append(arena, .{ .name = "KEVIN", .value = try std.fmt.allocPrint(arena, "{s} --file {s}", .{ exe, md_path }) });
-    try injected.append(arena, .{ .name = "KEVIN_DIR", .value = std.fs.path.dirname(md_path) orelse "." });
-    if (inv.verbose) {
-        try injected.append(arena, .{ .name = "verbose", .value = "true" });
-        try injected.append(arena, .{ .name = "KEVIN_VERBOSE", .value = "true" });
+    // Maximum number of scripts running at once: --jobs, then $KEVIN_JOBS, then the CPU count.
+    const jobs_text: ?[]const u8 = jobs_arg orelse init.environ_map.get("KEVIN_JOBS");
+    var jobs: usize = std.Thread.getCpuCount() catch 4;
+    if (jobs_text) |t| {
+        jobs = std.fmt.parseInt(usize, t, 10) catch 0;
+        if (jobs == 0) return fail("invalid number of jobs '{s}' (expected a positive integer)", .{t});
     }
-    var env = try init.environ_map.clone(arena);
-    for (injected.items) |p| try env.put(p.name, p.value);
+
+    // Resolve the whole dependency tree up front: unknown tasks, bad arguments
+    // and cycles fail before anything runs.
+    var builder: deps.Builder = .{ .arena = arena, .root = root };
+    var graph: ?*deps.Node = null;
+    var dep_error: ?[]const u8 = null;
+    if (usage_error == null and !inv.help) {
+        if (builder.build(resolved.cmd, inv.env)) |n| {
+            graph = n;
+        } else |err| switch (err) {
+            error.Invalid => dep_error = builder.err,
+            error.OutOfMemory => return err,
+        }
+    }
+
+    const exe = try std.process.executablePathAlloc(io, arena);
+    const injected = try deps.injectedVars(arena, exe, resolved.cmd, inv.env, inv.verbose, jobs);
 
     if (explain_flag) {
-        const steps: []const runner.Step = if (usage_error == null and !is_root and !no_code and !inv.help)
-            try runner.plan(arena, io, resolved.cmd, &env)
-        else
-            &.{};
+        const steps: []const runner.Step = if (graph != null and !is_root and !no_code) blk: {
+            var env = try init.environ_map.clone(arena);
+            for (injected) |p| try env.put(p.name, p.value);
+            break :blk try runner.plan(arena, io, resolved.cmd, &env);
+        } else &.{};
         try explain.print(out, .{
             .sources = sources.items,
             .warnings = warnings.items,
             .cmd = resolved.cmd,
             .path = resolved.path,
             .invocation = inv,
-            .usage_error = usage_error,
-            .injected = injected.items,
+            .usage_error = usage_error orelse dep_error,
+            .injected = injected,
             .steps = steps,
+            .graph = graph,
+            .jobs = jobs,
         });
         try out.flush();
-        if (usage_error != null) return 2;
+        if (usage_error != null or dep_error != null) return 2;
         for (steps) |st| if (st.status == .no_runtime) return 127;
         return 0;
     }
 
-    return runner.runCommand(arena, io, resolved.cmd, &env, inv.verbose);
+    if (dep_error) |msg_text| {
+        std.debug.print("kevin: {s}\n", .{msg_text});
+        return 2;
+    }
+
+    var ctx: deps.Ctx = .{
+        .arena = arena,
+        .io = io,
+        .base_env = init.environ_map,
+        .exe = exe,
+        .verbose = inv.verbose,
+        .jobs = jobs,
+        .slots = .{ .permits = jobs },
+    };
+    return deps.execute(&ctx, graph.?);
 }
 
 fn children(cmd: *const ast.Command) bool {

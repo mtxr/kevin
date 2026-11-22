@@ -301,6 +301,7 @@ pub fn printRootHelp(arena: Allocator, w: *Io.Writer, root: *const Command, sour
         .{ .left = "-f, --file <PATH>", .right = "Use a specific Markdown file" },
         .{ .left = "    --from <mask|xc>", .right = "Convert a mask/xc file to kevin syntax (stdout, or -o)" },
         .{ .left = "-o, --output <PATH>", .right = "With --from: write the result to a new file" },
+        .{ .left = "-j, --jobs <N>", .right = "Max scripts running at once (default: CPU count, or $KEVIN_JOBS)" },
         .{ .left = "    --explain", .right = "Show how the command resolves and what would run, without running it" },
         .{ .left = "-V, --version", .right = "Print the kevin version" },
         .{ .left = "-h, --help", .right = "Print help" },
@@ -311,9 +312,17 @@ pub fn printRootHelp(arena: Allocator, w: *Io.Writer, root: *const Command, sour
 pub fn printCommandHelp(arena: Allocator, w: *Io.Writer, cmd: *const Command, path: []const []const u8) (Allocator.Error || Io.Writer.Error)!void {
     const joined = try std.mem.join(arena, " ", path);
     try w.print("Usage: kevin {s}{s}", .{ joined, try argSignature(arena, cmd) });
-    if (cmd.children.items.len > 0 and cmd.blocks.items.len == 0) try w.writeAll(" <COMMAND>");
+    if (cmd.children.items.len > 0 and !cmd.hasWork()) try w.writeAll(" <COMMAND>");
     try w.writeAll(" [OPTIONS]\n");
     if (cmd.description.len > 0) try w.print("\n{s}\n", .{cmd.description});
+    if (cmd.deps.requires.items.len > 0) {
+        try w.writeAll("\nRequires: ");
+        for (cmd.deps.requires.items, 0..) |r, i| try w.print("{s}{s}", .{ if (i > 0) ", " else "", r });
+        try w.print(" ({s}", .{if (cmd.deps.run_deps == .async) "async" else "sync"});
+        if (cmd.deps.jobs) |j| try w.print(", at most {d} at once", .{j});
+        if (cmd.deps.run_once) try w.writeAll(", once per run");
+        try w.writeAll(")\n");
+    }
 
     if (cmd.args.items.len > 0) {
         try w.writeAll("\nArguments:\n");

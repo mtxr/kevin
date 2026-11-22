@@ -5,6 +5,7 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const cli = @import("cli.zig");
 const runner = @import("runner.zig");
+const deps = @import("deps.zig");
 const Io = std.Io;
 const Command = ast.Command;
 
@@ -20,6 +21,9 @@ pub const Info = struct {
     /// Variables kevin adds on top of the inherited environment.
     injected: []const cli.EnvPair,
     steps: []const runner.Step,
+    /// Resolved dependency tree (null when validation failed).
+    graph: ?*const deps.Node = null,
+    jobs: usize = 0,
 };
 
 fn lookup(pairs: []const cli.EnvPair, name: []const u8) ?[]const u8 {
@@ -34,6 +38,17 @@ fn writeArg(w: *Io.Writer, arg: []const u8, code: []const u8) Io.Writer.Error!vo
         try w.print("'{s}'", .{arg});
     } else {
         try w.writeAll(arg);
+    }
+}
+
+fn printTree(w: *Io.Writer, node: *const deps.Node, depth: usize) Io.Writer.Error!void {
+    if (node.deps.len == 0) return;
+    for (node.deps) |d| {
+        try w.splatByteAll(' ', depth * 2);
+        try w.print("{s}", .{d.cmd.name});
+        for (d.env) |p| try w.print(" {s}={s}", .{ p.name, p.value });
+        try w.print("  [{s}{s}]\n", .{ if (node.async_deps) "async" else "sync", if (d.once) ", once" else "" });
+        try printTree(w, d, depth + 1);
     }
 }
 
@@ -94,6 +109,13 @@ pub fn print(w: *Io.Writer, info: Info) Io.Writer.Error!void {
         return;
     }
     try w.writeAll("  ok\n");
+
+    if (info.graph) |g| {
+        if (g.deps.len > 0) {
+            try w.print("\nDependencies (max {d} scripts at once)\n", .{info.jobs});
+            try printTree(w, g, 1);
+        }
+    }
 
     try w.writeAll("\nEnvironment added by kevin\n");
     for (info.injected) |p| try w.print("  {s}={s}\n", .{ p.name, p.value });
