@@ -37,14 +37,38 @@ GitHub Actions runs on hosted runners (`.github/workflows`):
 - `ci.yml` on every push to `main` and every pull request: `kevin check` on
   Linux and macOS, unit tests on Windows, a cross-compile of every release
   target, and a lint of the pull request's commit messages.
-- `release.yml` when a `v*` tag is pushed: verifies that the tag matches the
-  version in `build.zig.zon`, runs `kevin check`, builds every target, and
-  publishes the archives with a `SHA256SUMS` file.
+- `release-please.yml` on every push to `main`: runs
+  [release-please](https://github.com/googleapis/release-please-action) in
+  manifest mode (`release-please-config.json`, `.release-please-manifest.json`).
+  Its `assets` job runs only when a release was created: it builds the tag,
+  runs `kevin check`, cross-compiles every target and uploads the archives and
+  a `SHA256SUMS` file to the release. It lives in the same workflow because
+  tags created with the default `GITHUB_TOKEN` do not trigger other workflows.
 
 Actions are pinned to commit SHAs. When bumping one, update the SHA and the
-tag named in the trailing comment together. To cut a release, change
-`.version` in `build.zig.zon`, merge, then push the matching tag
-(`git tag v0.1.0 && git push origin v0.1.0`).
+tag named in the trailing comment together.
+
+## Releases
+
+Releases are automated from Conventional Commits; never tag by hand.
+
+1. Merge Conventional Commits into `main`.
+2. release-please opens (and keeps updating) a release PR that bumps
+   `.version` in `build.zig.zon` (the `x-release-please-version` annotation)
+   and updates `CHANGELOG.md`. Only `feat`, `fix`, `perf`, `refactor` and
+   `docs` appear in the changelog.
+3. Merging that PR creates the `vX.Y.Z` tag and GitHub release, and the
+   `assets` job attaches the binaries.
+
+Versioning below 1.0 (`bump-minor-pre-major`): `feat` and breaking changes
+(`!` or a `BREAKING CHANGE:` footer) bump the minor version, `fix` bumps the
+patch. To force a version, add a `Release-As: x.y.z` footer to a commit body
+on `main`.
+
+The config currently has `"release-as": "0.1.0"` so the first release is
+v0.1.0. After that release is published, remove the `release-as` line from
+`release-please-config.json`, otherwise every later release PR would keep
+proposing 0.1.0.
 
 ## Commit messages
 
