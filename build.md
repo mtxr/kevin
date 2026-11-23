@@ -109,6 +109,7 @@ case "$msg" in *'no README.md, tasks.md or build.md found'*) ;; *) echo "smoke: 
 [ "$($bin -f examples/regressions.md positional a b)" = "count=2 first=[a] second=[b]" ] || { echo "smoke: positional parameters (two arguments)"; exit 1; }
 $bin -f examples/tasks.md --complete hel | grep -q "^hello" || { echo "smoke: completion of a command name"; exit 1; }
 $bin -f examples/tasks.md --complete "" | grep -q . || { echo "smoke: completion lists commands"; exit 1; }
+[ "$($bin -f examples/runtimes.md blocks | tail -1)" = "second block sees SHARED=[]" ] || { echo "smoke: blocks must not share variables"; exit 1; }
 for sh in zsh bash fish; do $bin --completion $sh | grep -q kevin || { echo "smoke: completion script for $sh"; exit 1; }; done
 
 # --introspect prints the command tree as JSON.

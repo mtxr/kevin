@@ -337,6 +337,12 @@ POSIX-shell blocks (`sh`/`bash`/`zsh`/`fish`) and Windows-shell blocks
 Blocks without a language, or with data languages (`json`, `yaml`, `toml`,
 `text`, `md`), are ignored.
 
+Every block is a separate process, so a variable exported by one block is not
+visible to the next, in the same language or another one. Arguments and flags
+reach every block as environment variables. See
+[`examples/runtimes.md`](examples/runtimes.md) for a command that mixes Node,
+bash and Python.
+
 ## Compatibility with mask and xc
 
 kevin borrows mask's argument and flag syntax almost verbatim, but it is
