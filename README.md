@@ -173,9 +173,52 @@ Without `--file`, kevin looks in the current directory for `README.md`,
 command tree, in that order. Pure namespaces are merged; if the same command
 exists in two files, the later file wins and a warning is printed.
 
-`kevin -f path/to/file.md ...` (or `--file`) uses exactly that file. Global
-flags (`-f`, `-j`, `--from`, `-o`, `--explain`) are only recognised before the command name, so tasks are free to
+`kevin -f path/to/file.md ...` (or `--file`) uses exactly that file and ignores
+`.kevinrc`. Repeat it to read several files, in order:
+`kevin -f a.md -f b.md build`. Global flags (`-f`, `-j`, `--from`, `-o`,
+`--explain`) are only recognised before the command name, so tasks are free to
 declare their own `-f`.
+
+### `.kevinrc`
+
+A `.kevinrc` file in the current directory (parent directories are never
+searched) chooses which Markdown files kevin reads. Example:
+
+```text
+# Extra files on top of README.md, tasks.md and build.md
+ops.md
+docs/*.md
+docs/ops/*.md
+# Leave some of them out again
+!docs/draft.md
+!README.md
+```
+
+Syntax, one entry per line (UTF-8, CRLF accepted, BOM ignored):
+
+- blank lines are ignored; a line whose first non-space character is `#` is a
+  comment (full-line comments only);
+- `!entry` excludes files, anything else includes them;
+- an entry is a relative path with `/` separators (`\` is accepted and
+  normalised): a direct path (`ops.md`, `docs/ops/deploy.md`) or a path whose
+  last segment contains `*` (`docs/*.md`, `*.md`). `*` matches any run of
+  characters, including none, inside that one segment and never crosses `/`.
+  A glob lists that single directory (not recursive) and `*` does not match
+  names starting with `.` unless the pattern segment starts with `.` too;
+- not supported, with a warning and the entry skipped: `**`, `*` in a
+  directory segment, absolute paths and any `..` segment (entries must stay
+  inside the current directory). There is no `?`, `[...]` or escaping.
+
+Resolution: the set starts with the default files (`README.md`, `tasks.md`,
+`build.md`, when present). Entries then apply top to bottom. An include appends
+its matches (a glob's matches sorted alphabetically; a file already in the set,
+compared by real path, is not added twice). An exclude removes matching files
+from the set built so far, defaults included, and a later include can add a file
+back. A direct path that does not exist is a warning; a glob that matches
+nothing is silent. Later files override earlier ones for the same command as
+usual. `kevin --explain` lists every file with the reason it was read
+(`default`, `.kevinrc line N`) and the files that were excluded, and tab
+completion uses the same set.
 
 ## Declaring commands
 
@@ -367,14 +410,18 @@ not given are left out). Also injected:
 
 | Variable      | Value                                                        |
 |---------------|--------------------------------------------------------------|
-| `$KEVIN`      | `<kevin binary> --file <absolute path of the declaring .md>` |
+| `$KEVIN`      | `<kevin binary> -f <file> -f <file> ...`: one `-f` (absolute path) for every file of the run, in order |
 | `$KEVIN_DIR`  | Directory of the Markdown file that declared the task        |
 | `KEVIN_JOBS`  | Maximum number of scripts running at once                    |
 | `KEVIN_DEPTH` | How many kevin runs are nested (1 in a task started by kevin); 32 is the limit |
 | `verbose`, `KEVIN_VERBOSE` | `true` when `-v/--verbose` was given            |
 
-`$KEVIN other-task` lets a task call its siblings from any directory. The value
-is not quoted, so a binary path with spaces needs `eval`. Tasks run in the
+`$KEVIN other-task` lets a task call any other task of the run from any
+directory, including tasks declared in other files (a task in `README.md` can
+run `$KEVIN test` declared in `build.md`). It carries the file list as `-f`
+arguments rather than an environment variable, so unrelated kevin runs are never
+affected. The value is not quoted, so a binary or file path with spaces needs
+`eval`. Tasks run in the
 directory kevin was started from.
 
 ## Runtimes and multiple blocks
@@ -432,7 +479,7 @@ files need small edits (see below). A `?` means the behaviour was not verified a
 
 | Feature                                   | mask                   | xc                            | kevin                                   |
 |-------------------------------------------|------------------------|-------------------------------|-----------------------------------------|
-| Default file                              | `maskfile.md`          | `README.md`                   | `README.md`, `tasks.md`, `build.md` (merged) |
+| Default file                              | `maskfile.md`          | `README.md`                   | `README.md`, `tasks.md`, `build.md` (merged), adjustable with `.kevinrc` |
 | Explicit file flag                        | `--maskfile`           | ?                             | `-f` / `--file`                         |
 | Command declaration                       | every heading          | headings one level below a `Tasks` heading | `## > name` or ```` ```lang task ```` |
 | Nested subcommands by heading depth       | yes                    | no (flat list)                | yes                                     |

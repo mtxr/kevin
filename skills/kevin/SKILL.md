@@ -21,7 +21,11 @@ https://github.com/mtxr/kevin (README.md, docs/for-agents.md).
    `kevin check`.
 
 If kevin says `no README.md, tasks.md or build.md found`, the directory has no
-kevin tasks; use `kevin --file <path>` for a specific file.
+kevin tasks; use `kevin --file <path>` for a specific file (repeat `-f` for
+several; `-f` ignores `.kevinrc`). A `.kevinrc` in the current directory adds
+(`docs/*.md`, `ops.md`) or removes (`!docs/draft.md`) files on top of the
+defaults: `#` comments, relative paths, `*` only in the last segment.
+`kevin --explain` shows which files were read and why.
 
 ## Syntax cheat sheet
 
