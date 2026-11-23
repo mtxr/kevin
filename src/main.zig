@@ -265,6 +265,7 @@ pub fn main(init: std.process.Init) !u8 {
         const steps: []const runner.Step = if (graph != null and !is_root and !no_code) blk: {
             var env = try init.environ_map.clone(arena);
             for (injected) |p| try env.put(p.name, p.value);
+            for (inv.unset) |n| _ = env.swapRemove(n);
             break :blk try runner.plan(arena, io, resolved.cmd, &env);
         } else &.{};
         try explain.print(out, .{

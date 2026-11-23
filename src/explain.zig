@@ -31,6 +31,11 @@ fn lookup(pairs: []const cli.EnvPair, name: []const u8) ?[]const u8 {
     return null;
 }
 
+fn inList(list: []const []const u8, name: []const u8) bool {
+    for (list) |n| if (std.mem.eql(u8, n, name)) return true;
+    return false;
+}
+
 fn writeArg(w: *Io.Writer, arg: []const u8, code: []const u8) Io.Writer.Error!void {
     if (std.mem.eql(u8, arg, code) and code.len > 0) {
         try w.writeAll("<code>");
@@ -94,6 +99,8 @@ pub fn print(w: *Io.Writer, info: Info) Io.Writer.Error!void {
             try w.print("  env: {s} = ", .{f.name});
             if (lookup(info.invocation.env, f.name)) |v| {
                 try w.print("{s}\n", .{v});
+            } else if (inList(info.invocation.unset, f.name)) {
+                try w.writeAll("(unset: not inherited from the environment)\n");
             } else try w.writeAll("(not set)\n");
         }
     }
@@ -222,4 +229,49 @@ test "explain prints source, validation and per-block decisions" {
         .steps = &.{},
     });
     try testing.expect(std.mem.indexOf(u8, aw2.written(), "FAILED: missing required argument <target>") != null);
+}
+
+test "explain shows example blocks as skipped and absent flags as unset" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const src =
+        \\## > demo
+        \\
+        \\**OPTIONS**
+        \\* quiet
+        \\
+        \\```sh
+        \\echo one
+        \\```
+        \\
+        \\For example:
+        \\
+        \\```sh
+        \\demo --quiet
+        \\```
+        \\
+    ;
+    const root = (try parser.parseSource(arena, "/x/tasks.md", src)).root;
+    const cmd = root.find("demo").?;
+    var msg: []const u8 = "";
+    const inv = try cli.parseInvocation(arena, cmd, &.{}, &msg);
+    var env = std.process.Environ.Map.init(arena);
+    const steps = try runner.planFor(arena, testing.io, cmd, &env, .linux);
+    var aw: Io.Writer.Allocating = .init(arena);
+    try print(&aw.writer, .{
+        .sources = &.{"/x/tasks.md"},
+        .warnings = &.{},
+        .cmd = cmd,
+        .path = &.{"demo"},
+        .invocation = inv,
+        .usage_error = null,
+        .injected = inv.env,
+        .steps = steps,
+    });
+    const out = aw.written();
+    try testing.expect(std.mem.indexOf(u8, out, "env: quiet = (unset") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "skipped (example:") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "add `task`") != null);
 }

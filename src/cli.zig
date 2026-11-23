@@ -14,6 +14,9 @@ pub const Invocation = struct {
     help: bool = false,
     verbose: bool = false,
     env: []const EnvPair = &.{},
+    /// Flags that are absent or false: removed from the child's environment so a
+    /// variable of the same name inherited from the caller cannot leak in.
+    unset: []const []const u8 = &.{},
 };
 
 pub const Resolved = struct {
@@ -162,6 +165,7 @@ pub fn parseInvocation(
     }
 
     var env: std.ArrayList(EnvPair) = .empty;
+    var unset: std.ArrayList([]const u8) = .empty;
     for (args, 0..) |a, idx| {
         if (idx < positionals.items.len) {
             try env.append(arena, .{ .name = a.name, .value = positionals.items[idx] });
@@ -181,6 +185,7 @@ pub fn parseInvocation(
                 err_msg.* = try std.fmt.allocPrint(arena, "missing required flag {s}", .{flagLabel(f)});
                 return error.Usage;
             }
+            try unset.append(arena, f.name);
             continue;
         };
         switch (f.ftype) {
@@ -191,7 +196,10 @@ pub fn parseInvocation(
                 };
             },
             .boolean => {
-                if (std.mem.eql(u8, v, "false")) continue; // `--flag=false` behaves as absent
+                if (std.mem.eql(u8, v, "false")) { // `--flag=false` behaves as absent
+                    try unset.append(arena, f.name);
+                    continue;
+                }
             },
             .string => {},
         }
@@ -209,6 +217,7 @@ pub fn parseInvocation(
     }
 
     inv.env = env.items;
+    inv.unset = unset.items;
     return inv;
 }
 
@@ -413,6 +422,32 @@ const sample =
 fn lookup(inv: Invocation, name: []const u8) ?[]const u8 {
     for (inv.env) |p| if (std.mem.eql(u8, p.name, name)) return p.value;
     return null;
+}
+
+fn inList(list: []const []const u8, name: []const u8) bool {
+    for (list) |n| if (std.mem.eql(u8, n, name)) return true;
+    return false;
+}
+
+test "absent and false flags are listed as unset" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const root = (try parser.parseSource(arena, "/x.md", sample)).root;
+    const cmd = root.find("serve").?;
+    var msg: []const u8 = "";
+
+    const none = try parseInvocation(arena, cmd, &.{ "web", "-p", "1" }, &msg);
+    try testing.expect(inList(none.unset, "env"));
+    try testing.expect(inList(none.unset, "watch"));
+    try testing.expect(!inList(none.unset, "port"));
+
+    const set = try parseInvocation(arena, cmd, &.{ "web", "-p", "1", "-w", "-e", "dev" }, &msg);
+    try testing.expectEqual(@as(usize, 0), set.unset.len);
+
+    const off = try parseInvocation(arena, cmd, &.{ "web", "-p", "1", "--watch=false" }, &msg);
+    try testing.expect(inList(off.unset, "watch"));
+    try testing.expect(lookup(off, "watch") == null);
 }
 
 test "resolve nested commands and parse args/flags" {

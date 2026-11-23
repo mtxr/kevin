@@ -130,6 +130,11 @@ pub fn splitWords(arena: Allocator, s: []const u8) Allocator.Error![]const []con
     return words.items;
 }
 
+fn envValueOrNull(env: []const cli.EnvPair, name: []const u8) ?[]const u8 {
+    for (env) |p| if (std.mem.eql(u8, p.name, name)) return p.value;
+    return null;
+}
+
 fn envValue(env: []const cli.EnvPair, name: []const u8) []const u8 {
     for (env) |p| if (std.mem.eql(u8, p.name, name)) return p.value;
     return "";
@@ -226,6 +231,10 @@ fn executeOnce(ctx: *Ctx, node: *Node) u8 {
     const vars = injectedVars(ctx.arena, ctx.exe, node.cmd, node.env, ctx.verbose, ctx.jobs) catch return 1;
     var env = ctx.base_env.clone(ctx.arena) catch return 1;
     for (vars) |p| env.put(p.name, p.value) catch return 1;
+    // Absent or false flags must not inherit a same-named variable from the caller.
+    for (node.cmd.flags.items) |f| {
+        if (envValueOrNull(node.env, f.name) == null) _ = env.swapRemove(f.name);
+    }
     return runner.runCommand(ctx.arena, ctx.io, node.cmd, &env, ctx.verbose) catch 1;
 }
 
