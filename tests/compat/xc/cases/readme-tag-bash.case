@@ -1,4 +1,4 @@
 # Source: joerdav/xc README.md "tag": xc runs untagged blocks with a bash-compatible interpreter and set -e
 input: readme.md
 output-not-contains: ```sh
-xfail: untagged blocks become sh (dash on many Linux systems) without set -e; bash arrays and [[ ]] in the tag task break there
+xfail: the assertion is too broad, not a migration gap: the untagged tag task already becomes a bash block with set -e, but other tasks in readme.md are explicitly tagged sh, so the text ```sh legitimately appears in the output
