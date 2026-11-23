@@ -277,15 +277,38 @@ Jobs: 2
 The whole dependency tree is resolved before anything runs, so unknown names,
 bad arguments and cycles (`dependency cycle: a -> b -> a`) fail up front with
 exit code 2. Sync dependencies stop at the first failure. Async dependencies
-all run to completion, then kevin fails with the first failing exit code in
-declaration order; their output is interleaved. Failing dependencies stop the
-command's own script from running, and the exit code is propagated.
+fail fast: when one of them fails, the siblings that are still running receive
+SIGTERM, the ones that have not started yet never start, and kevin fails with
+the exit code of the first failure (not of the siblings it stopped). Their
+output is interleaved. Failing dependencies stop the command's own script from
+running, and the exit code is propagated.
 
 `-j N` / `--jobs N` (or `KEVIN_JOBS=N`) caps how many scripts run at once across
-the whole tree. The default is the number of CPUs. `Jobs:` limits one command's
-group of dependencies, and `--jobs` still applies on top. Scripts that call
+the whole tree, in both directions: `-j 2` never runs more than two, and `-j 41`
+runs 41 async dependencies at the same time, whatever the CPU count. The
+default is the number of CPUs. `Jobs:` limits one command's group of
+dependencies, and `--jobs` still applies on top. Scripts that call
 `$KEVIN other` start a separate kevin process, which inherits `KEVIN_JOBS` but
 counts its own scripts.
+
+## Signals and cleanup
+
+On Linux and macOS kevin handles SIGINT, SIGTERM and SIGHUP: the signal is
+forwarded to every running script, kevin waits for them and exits with 128 plus
+the signal number (143 for SIGTERM). Pending tasks do not start. A second
+signal sends SIGKILL to the scripts instead of waiting for them. Scripts that
+trap the signal get to clean up first.
+
+Each script runs in its own process group, so the signal reaches the whole
+subtree (for example a `sleep` started by a shell script), except when stdin is
+a terminal: a background group cannot read the terminal, so scripts then stay in
+kevin's group, the terminal delivers Ctrl-C to all of them and kevin does not
+forward SIGINT a second time. SIGKILL to kevin itself cannot be handled and
+leaves the scripts and the temp directory behind.
+
+kevin stops a task that calls itself through `$KEVIN` (directly or in a cycle)
+at 32 nested runs: it sets `KEVIN_DEPTH` for every child and exits with code 2
+and a message once the limit is reached.
 
 ## Explaining a command
 
@@ -320,14 +343,15 @@ them (zsh and fish).
 
 Arguments and flags are injected into the script's environment. Declared
 arguments also arrive as `$1..$n` in `sh`, `bash` and `zsh` blocks (xc style;
-`$0` is `kevin`, and trailing optional arguments that were not given are left
-out). Also injected:
+`$0` is the temporary script file, and trailing optional arguments that were
+not given are left out). Also injected:
 
 | Variable      | Value                                                        |
 |---------------|--------------------------------------------------------------|
 | `$KEVIN`      | `<kevin binary> --file <absolute path of the declaring .md>` |
 | `$KEVIN_DIR`  | Directory of the Markdown file that declared the task        |
 | `KEVIN_JOBS`  | Maximum number of scripts running at once                    |
+| `KEVIN_DEPTH` | How many kevin runs are nested (1 in a task started by kevin); 32 is the limit |
 | `verbose`, `KEVIN_VERBOSE` | `true` when `-v/--verbose` was given            |
 
 `$KEVIN other-task` lets a task call its siblings from any directory. The value
@@ -336,17 +360,25 @@ directory kevin was started from.
 
 ## Runtimes and multiple blocks
 
-| Language                      | Runs with                                         |
+Every block is written to a file in a private temporary directory (created per
+run with mode 0700, removed afterwards, also after a failure or a signal) and
+run as `<interpreter> <file> [args]`. stdin is never touched, so scripts can
+read from the terminal or a pipe, and the code size is not limited by the OS
+argument limit. Error messages of shells show the temporary path instead of
+`bash -c`; `$0` is that path. The directory is created under `$TMPDIR` (`/tmp`),
+or `%TEMP%` on Windows.
+
+| Language                      | Runs with (first one found in `PATH`)             |
 |-------------------------------|---------------------------------------------------|
-| `sh` `bash` `zsh` `fish`      | `<shell> -c`                                      |
-| `js` `javascript`             | `node -e`, else `bun -e`                          |
-| `ts` `typescript`             | `bun run -`, else `tsx -e`, else `deno run -`     |
-| `py` `python`                 | `uv run python -c`, else `python3 -c`, `python -c`|
-| `ruby` `rb`                   | `ruby -e`                                         |
-| `lua`                         | `lua -e`                                          |
-| `php`                         | `php -r`                                          |
-| `powershell` `pwsh`           | `pwsh -Command`, else `powershell -Command`       |
-| `bat` `cmd`                   | `cmd /c`                                          |
+| `sh` `bash` `zsh` `fish`      | `<shell> file` (`$1..$n` in sh, bash, zsh)        |
+| `js` `javascript`             | `node file`, else `bun run file`                  |
+| `ts` `typescript`             | `bun run file`, else `tsx file`, else `deno run -A file` |
+| `py` `python`                 | `python3 file`, `python file`, else `uv run --no-project python file` |
+| `ruby` `rb`                   | `ruby file`                                       |
+| `lua`                         | `lua file`                                        |
+| `php`                         | `php file` (`<?php` is added unless the block starts with an open tag) |
+| `powershell` `pwsh`           | `pwsh -NoProfile -File file.ps1`, else `powershell -NoProfile -ExecutionPolicy Bypass -File file.ps1` |
+| `bat` `cmd`                   | `cmd /c file.bat` (`@echo off` is added, line endings become CRLF) |
 
 A command with several blocks runs them in order and stops at the first
 non-zero exit code, which becomes kevin's exit code. If it has both
@@ -443,6 +475,13 @@ kevin release   # cross-compile for linux, macos and windows into dist/
   declared arguments are not supported.
 - Dependencies that run `async` print their output interleaved.
 - Task execution on Windows has not been exercised yet (it only cross-compiles).
+  There is no signal forwarding on Windows: Ctrl-C reaches every process of the
+  console on its own, and `RunDeps: async` fail-fast terminates the siblings
+  with TerminateProcess (no grace period, grandchildren are not reached).
+- Signal handling needs a process group per script; with a terminal as stdin a
+  script's own background children can outlive a SIGTERM sent to kevin.
+- A script that ignores SIGTERM keeps an async group (and kevin) waiting; send a
+  second signal to force it.
 - `--from xc` does not read inputs given only through environment variables,
   setext headings or org-mode files; `--from mask` keeps every code block of a
   command, while mask runs only one.

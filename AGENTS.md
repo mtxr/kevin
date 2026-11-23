@@ -34,6 +34,7 @@ tasks in `build.md` (and `README.md`). Bootstrap once with `zig build`, then:
 - `src/parser.zig`: line-based state machine, Markdown to command tree.
 - `src/cli.zig`: command resolution, argument and flag parsing, `--help`.
 - `src/deps.zig`, `src/runner.zig`: dependency graph, block selection, processes.
+- `src/proc.zig`: live-child registry, signal forwarding, fail-fast scopes, temp script directory.
 - `src/explain.zig`, `src/introspect.zig`: `--explain` and `--introspect`.
 - `src/migrate.zig`: `--from mask|xc`.
 - `src/main.zig`: global flags and wiring.
