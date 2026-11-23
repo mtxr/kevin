@@ -8,6 +8,7 @@ const runner = @import("runner.zig");
 const migrate = @import("migrate.zig");
 const explain = @import("explain.zig");
 const deps = @import("deps.zig");
+const proc = @import("proc.zig");
 const introspect = @import("introspect.zig");
 const complete = @import("complete.zig");
 const build_options = @import("build_options");
@@ -20,12 +21,15 @@ test {
     _ = migrate;
     _ = explain;
     _ = deps;
+    _ = proc;
     _ = introspect;
     _ = complete;
 }
 
 const default_files = [_][]const u8{ "readme.md", "tasks.md", "build.md" };
 const max_file_size = 16 * 1024 * 1024;
+/// Upper bound of async worker threads (waiting tasks are cheap, but not free).
+const max_threads = 1024;
 
 fn fail(comptime fmt: []const u8, args: anytype) u8 {
     std.debug.print("kevin: " ++ fmt ++ "\n", args);
@@ -254,6 +258,8 @@ pub fn main(init: std.process.Init) !u8 {
         }
     }
 
+    if (init.environ_map.get("KEVIN_DEPTH")) |d| deps.depth = std.fmt.parseInt(u32, d, 10) catch 0;
+
     const exe = try std.process.executablePathAlloc(io, arena);
     const injected = try deps.injectedVars(arena, exe, resolved.cmd, inv.env, inv.verbose, jobs);
 
@@ -286,16 +292,38 @@ pub fn main(init: std.process.Init) !u8 {
         return 2;
     }
 
+    if (deps.depth >= deps.max_depth) {
+        return fail("tasks are nested {d} kevin runs deep (KEVIN_DEPTH); a task probably calls itself through $KEVIN", .{deps.depth});
+    }
+
+    // The async runtime must be able to hold one thread per task that may wait
+    // at the same time; the number of scripts running at once is bounded by
+    // the --jobs semaphore, not by the thread pool.
+    const node_count = try deps.countNodes(arena, graph.?);
+    var threaded: Io.Threaded = .init(init.gpa, .{
+        .async_limit = .limited(@min(node_count, max_threads)),
+        .environ = init.minimal.environ,
+    });
+    defer threaded.deinit();
+    const exec_io = threaded.io();
+
+    // Children get their own process group unless stdin is a terminal (a
+    // background group cannot read it).
+    const interactive = Io.File.stdin().isTty(io) catch false;
+    proc.installSignalHandlers(!interactive);
+    defer proc.cleanupTemp(exec_io);
+
     var ctx: deps.Ctx = .{
         .arena = arena,
-        .io = io,
+        .io = exec_io,
         .base_env = init.environ_map,
         .exe = exe,
         .verbose = inv.verbose,
         .jobs = jobs,
         .slots = .{ .permits = jobs },
     };
-    return deps.execute(&ctx, graph.?);
+    const code = deps.execute(&ctx, graph.?);
+    return proc.signalExitCode() orelse code;
 }
 
 fn children(cmd: *const ast.Command) bool {
