@@ -266,10 +266,11 @@ const Group = struct {
     first_failure: std.atomic.Value(u8) = .init(0),
 };
 
+/// Runs one member of a group. The caller already took one of the group's
+/// `Jobs:` slots, in declaration order; it is released here when the member ends.
 fn asyncRun(ctx: *Ctx, dep: *Node, group: *Group) Io.Cancelable!void {
-    group.slots.waitUncancelable(ctx.io);
     defer group.slots.post(ctx.io);
-    // Fail-fast: a sibling already failed, so this one never starts.
+    // Fail-fast: a sibling failed while this one was being started.
     if (group.scope.isCancelled()) return;
 
     const prev = proc.enterScope(&group.scope);
@@ -291,6 +292,13 @@ fn runAsync(ctx: *Ctx, node: *Node) u8 {
         .slots = .{ .permits = node.jobs orelse node.deps.len },
     };
     for (node.deps) |dep| {
+        // Slots are taken here, in declaration order, so with `Jobs: N` the first N
+        // dependencies start first and the pending ones start only as slots free up.
+        group.slots.waitUncancelable(ctx.io);
+        if (group.scope.isCancelled()) {
+            group.slots.post(ctx.io);
+            break;
+        }
         if (ctx.verbose) std.debug.print("+ {s} requires {s} (async)\n", .{ node.cmd.name, dep.cmd.name });
         io_group.async(ctx.io, asyncRun, .{ ctx, dep, &group });
     }
