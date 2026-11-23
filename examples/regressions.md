@@ -30,3 +30,11 @@ echo "watch_mode=${watch_mode:-unset}"
 ```sh
 echo "name=[$name]"
 ```
+
+## > positional (first) [second]
+
+> Declared arguments also arrive as $1..$n in shell blocks.
+
+```bash
+echo "count=$# first=[$1] second=[$2]"
+```

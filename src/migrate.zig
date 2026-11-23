@@ -551,8 +551,8 @@ fn convertXcTask(
         if (has_setup and !shell) {
             try note(arena, notes, "task '{s}': Directory/Env cannot be applied to a {s} block; set them manually", .{ name, lang });
         }
-        if (usesPositional(code)) {
-            try note(arena, notes, "task '{s}': the script uses positional parameters ($1, $@...); kevin passes arguments as named environment variables, so declare them as (name) in the heading", .{name});
+        if (inputs.items.len == 0 and usesPositional(code)) {
+            try note(arena, notes, "task '{s}': the script uses positional parameters ($1, $@...) but declares no Inputs; kevin only passes declared arguments, so add them as (name) in the heading and they also arrive as $1..$n", .{name});
         }
 
         try out.print(arena, "{s}{s}\n", .{ try fenceOf(arena, f), lang });
