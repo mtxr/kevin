@@ -31,10 +31,8 @@ fn lookup(pairs: []const cli.EnvPair, name: []const u8) ?[]const u8 {
     return null;
 }
 
-fn writeArg(w: *Io.Writer, arg: []const u8, code: []const u8) Io.Writer.Error!void {
-    if (std.mem.eql(u8, arg, code) and code.len > 0) {
-        try w.writeAll("<code>");
-    } else if (arg.len == 0 or std.mem.indexOfAny(u8, arg, " \t'\"") != null) {
+fn writeArg(w: *Io.Writer, arg: []const u8) Io.Writer.Error!void {
+    if (arg.len == 0 or std.mem.indexOfAny(u8, arg, " \t'\"") != null) {
         try w.print("'{s}'", .{arg});
     } else {
         try w.writeAll(arg);
@@ -145,12 +143,16 @@ pub fn print(w: *Io.Writer, info: Info) Io.Writer.Error!void {
                 try w.writeAll(t);
             }
             try w.writeAll("\n       argv:    ");
-            for (l.argv, 0..) |a, k| {
-                if (k > 0) try w.writeByte(' ');
-                try writeArg(w, a, b.code);
+            for (l.argv) |a| {
+                try writeArg(w, a);
+                try w.writeByte(' ');
+            }
+            try w.writeAll("<temp file>");
+            for (l.args) |a| {
+                try w.writeByte(' ');
+                try writeArg(w, a);
             }
             try w.writeByte('\n');
-            if (l.stdin != null) try w.writeAll("       stdin:   <code>\n");
         }
         try w.writeAll("       code:\n");
         var it = std.mem.splitScalar(u8, std.mem.trimEnd(u8, b.code, "\n"), '\n');
