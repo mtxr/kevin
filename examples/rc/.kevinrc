@@ -1,0 +1,7 @@
+# Extra files on top of README.md, tasks.md and build.md.
+ops.md
+docs/*.md
+docs/ops/*.md
+# Leave some of them out again.
+!docs/draft.md
+!docs/ops/sec*.md

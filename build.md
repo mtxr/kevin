@@ -213,6 +213,41 @@ case "$exp" in *'name (required) = World'*'argv:    bash <temp file>'*) ;; *) ec
 $bin -f examples/tasks.md --explain hello World -t abc >/dev/null 2>&1 && { echo "smoke: explain accepted bad input"; exit 1; }
 case "$($bin --version)" in "kevin "*) ;; *) echo "smoke: unexpected version output"; exit 1 ;; esac
 
+# .kevinrc: globs, direct paths, excludes, $KEVIN over the whole set, repeated -f.
+rcbin=$PWD/$bin
+rc() { (cd examples/rc && "$rcbin" "$@"); }
+[ "$(rc from-readme)" = "readme" ] || { echo "smoke: default file missing with .kevinrc"; exit 1; }
+[ "$(rc from-ops)" = "ops" ] || { echo "smoke: direct path include failed"; exit 1; }
+[ "$(rc from-guide)" = "guide" ] && [ "$(rc from-api)" = "api" ] || { echo "smoke: glob include failed"; exit 1; }
+[ "$(rc deploy)" = "deploy" ] || { echo "smoke: nested glob include failed"; exit 1; }
+set +e
+rc from-draft >/dev/null 2>&1
+[ "$?" = "2" ] || { echo "smoke: direct exclude failed"; exit 1; }
+rc from-secret >/dev/null 2>&1
+[ "$?" = "2" ] || { echo "smoke: glob exclude failed"; exit 1; }
+set -e
+[ "$(rc via-kevin)" = "ops" ] || { echo "smoke: \$KEVIN does not see the other files"; exit 1; }
+exp=$(rc --explain from-api)
+case "$exp" in *'(.kevinrc line 3)'*'excluded: docs/draft.md (.kevinrc line 6)'*) ;; *) echo "smoke: explain does not show .kevinrc: $exp"; exit 1 ;; esac
+rc --complete "" | grep -q '^from-guide' || { echo "smoke: completion ignores .kevinrc"; exit 1; }
+[ "$(rc -f ops.md -f docs/api.md from-api)" = "api" ] && [ "$(rc -f ops.md -f docs/api.md from-ops)" = "ops" ] || { echo "smoke: repeated -f failed"; exit 1; }
+set +e
+rc -f README.md from-ops >/dev/null 2>&1
+[ "$?" = "2" ] || { echo "smoke: -f did not ignore .kevinrc"; exit 1; }
+set -e
+# Without a .kevinrc only the default files load; a missing direct path warns.
+mkdir "$tmp/rcdefault" "$tmp/rcmissing"
+cp examples/rc/README.md examples/rc/ops.md "$tmp/rcdefault/"
+cp examples/rc/README.md examples/rc/.kevinrc "$tmp/rcmissing/"
+printf 'nope.md\n' >> "$tmp/rcmissing/.kevinrc"
+[ "$(cd "$tmp/rcdefault" && "$rcbin" from-readme)" = "readme" ] || { echo "smoke: default discovery changed"; exit 1; }
+set +e
+(cd "$tmp/rcdefault" && "$rcbin" from-ops >/dev/null 2>&1)
+[ "$?" = "2" ] || { echo "smoke: ops.md loaded without .kevinrc"; exit 1; }
+set -e
+msg=$(cd "$tmp/rcmissing" && "$rcbin" from-readme 2>&1)
+case "$msg" in *"\`.kevinrc\` line 8: 'nope.md' does not exist"*) ;; *) echo "smoke: no warning for a missing .kevinrc entry: $msg"; exit 1 ;; esac
+
 echo "smoke: ok"
 ```
 
