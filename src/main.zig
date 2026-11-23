@@ -10,6 +10,7 @@ const explain = @import("explain.zig");
 const deps = @import("deps.zig");
 const introspect = @import("introspect.zig");
 const complete = @import("complete.zig");
+const update = @import("update.zig");
 const build_options = @import("build_options");
 
 test {
@@ -22,6 +23,7 @@ test {
     _ = deps;
     _ = introspect;
     _ = complete;
+    _ = update;
 }
 
 const default_files = [_][]const u8{ "readme.md", "tasks.md", "build.md" };
@@ -85,6 +87,8 @@ pub fn main(init: std.process.Init) !u8 {
             try w.interface.print("kevin {s}\n", .{build_options.version});
             try w.interface.flush();
             return 0;
+        } else if (std.mem.eql(u8, a, "--check-update")) {
+            return checkUpdate(init.gpa, io);
         } else if (std.mem.eql(u8, a, "--completion")) {
             i += 1;
             const shell = if (i < argv.len) std.meta.stringToEnum(complete.Shell, argv[i]) else null;
@@ -296,6 +300,24 @@ pub fn main(init: std.process.Init) !u8 {
         .slots = .{ .permits = jobs },
     };
     return deps.execute(&ctx, graph.?);
+}
+
+fn checkUpdate(gpa: std.mem.Allocator, io: Io) !u8 {
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const res = try update.check(arena_state.allocator(), io, build_options.version);
+    switch (res) {
+        .up_to_date => |tag| std.debug.print("kevin {s} is up to date (latest release: {s})\n", .{ build_options.version, tag }),
+        .available => |tag| std.debug.print(
+            "kevin {s} is available (you have {s}).\nUpdate: curl -fsSL https://raw.githubusercontent.com/mtxr/kevin/main/install.sh | sh\nOr see {s}\n",
+            .{ tag, build_options.version, update.releases_url },
+        ),
+        .failed => |why| {
+            std.debug.print("kevin: update check failed: {s}\n", .{why});
+            return 1;
+        },
+    }
+    return 0;
 }
 
 fn children(cmd: *const ast.Command) bool {
