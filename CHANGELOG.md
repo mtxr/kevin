@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.0](https://github.com/mtxr/kevin/compare/v0.1.0...v0.2.0) (2026-11-23)
+
+
+### Features
+
+* add .kevinrc to choose Markdown files and share them via $KEVIN ([#10](https://github.com/mtxr/kevin/issues/10)) ([3699f92](https://github.com/mtxr/kevin/commit/3699f92d71b3bf233631749377c3f2230d63060e))
+* **cli:** add --check-update and an install script ([#5](https://github.com/mtxr/kevin/issues/5)) ([5b59f05](https://github.com/mtxr/kevin/commit/5b59f05a075c7fa4916b1dc7daf4a84d3e15ed75))
+* **cli:** add --completion for zsh, bash and fish ([#4](https://github.com/mtxr/kevin/issues/4)) ([3c6783d](https://github.com/mtxr/kevin/commit/3c6783d077f102d6951c1e46b2625c5be94f3c0d))
+* **runner:** pass declared args as $1..$n to shell blocks ([#3](https://github.com/mtxr/kevin/issues/3)) ([fbf1db9](https://github.com/mtxr/kevin/commit/fbf1db99f554b5a6d9a29c0ccc82dbda6dc962d2))
+
+
+### Bug Fixes
+
+* **deps:** treat expanded Requires values as positional data ([#9](https://github.com/mtxr/kevin/issues/9)) ([d340af9](https://github.com/mtxr/kevin/commit/d340af91790aa0db3645eec0d24c45cc31aa27db))
+* **parser:** harden attributes, examples, names, env and migration ([#7](https://github.com/mtxr/kevin/issues/7)) ([f03b746](https://github.com/mtxr/kevin/commit/f03b7468df20637442597683473fabd3dfceed8f))
+* **runner:** signals, fail-fast, real --jobs, temp-file launchers ([#8](https://github.com/mtxr/kevin/issues/8)) ([e080a7d](https://github.com/mtxr/kevin/commit/e080a7d607731a06869303463d57567400e47a8f))
+
 ## 0.1.0 (2026-11-23)
 
 
