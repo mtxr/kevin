@@ -88,6 +88,14 @@ $bin -j 0 -f examples/deps.md parallel >/dev/null 2>&1
 [ "$?" = "2" ] || { echo "smoke: invalid --jobs accepted"; exit 1; }
 set -e
 
+# Structured dependencies: expanded values are data, never commands or flags.
+sd=examples/structured-deps.md
+[ "$($bin -f $sd deploy docs | head -n 1)" = "build target=[docs] dry_run=[unset]" ] || { echo "smoke: a value shadowed by a subcommand"; exit 1; }
+[ "$($bin -f $sd deploy -- -n | head -n 1)" = "build target=[-n] dry_run=[unset]" ] || { echo "smoke: a value was read as a flag"; exit 1; }
+[ "$($bin -f $sd deploy -- --help | head -n 1)" = "build target=[--help] dry_run=[unset]" ] || { echo "smoke: --help value was honoured"; exit 1; }
+[ "$($bin -f $sd deploy '' | head -n 1)" = "build target=[] dry_run=[unset]" ] || { echo "smoke: an empty value was dropped"; exit 1; }
+[ "$($bin -f $sd serve | head -n 1)" = "build target=[prod] dry_run=[true]" ] || { echo "smoke: a literal flag in Requires stopped working"; exit 1; }
+
 # Regressions: indented fences inside a block, flags without a flags line,
 # a UTF-8 BOM, and a directory without any task file.
 [ "$($bin -f examples/regressions.md heredoc | tail -n 1)" = "after" ] || { echo "smoke: indented fence truncated the script"; exit 1; }

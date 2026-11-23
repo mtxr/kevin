@@ -292,6 +292,16 @@ the exit code of the first failure (not of the siblings it stopped). Their
 output is interleaved. Failing dependencies stop the command's own script from
 running, and the exit code is propagated.
 
+Each entry is read structurally. The command path is the leading words written
+literally in the `Requires:` line; everything after it is argument material.
+Text that comes from a `$name` expansion is always a positional value (or the
+value of the flag just before it): it is never read as a command, `--help`,
+`-v`, `--` or a flag, even when it looks like one, and an empty value stays an
+empty argument. Words written literally keep working as flags
+(`Requires: serve --port 8080`), as does a flag with an expanded value
+(`--port=$p`). `--help` and `-h` are never honoured in a dependency. Because the
+command path is literal, a command name cannot come from a variable.
+
 `-j N` / `--jobs N` (or `KEVIN_JOBS=N`) caps how many scripts run at once across
 the whole tree, in both directions: `-j 2` never runs more than two, and `-j 41`
 runs 41 async dependencies at the same time, whatever the CPU count. The

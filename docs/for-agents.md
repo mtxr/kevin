@@ -87,7 +87,11 @@ RunDeps: async
 - `Requires:` takes comma separated entries, each a command and its arguments
   (`$name` is expanded from the current command's arguments). `RunDeps: async`
   runs them concurrently and stops the siblings (SIGTERM) when one fails;
-  `Run: once` dedupes, `Jobs: N` limits concurrency.
+  `Run: once` dedupes, `Jobs: N` limits concurrency. The command path is only
+  the leading literal words; a `$name` expansion is always a positional value,
+  never a command, `--help`, `-v`, `--` or a flag (literal flags such as
+  `--port 8080` and `--port=$p` still work), and `--help` is never honoured in
+  a dependency.
 - Several code blocks under one command run in order and stop at the first
   failure. Blocks without a language, or in data languages (`json`, `yaml`,
   `md`), are ignored. Inside a fenced block everything is literal.
