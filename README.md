@@ -80,50 +80,32 @@ coding agent? See [docs/for-agents.md](docs/for-agents.md).
 
 ## Install
 
-### From the releases page
-
-Every release publishes one archive per platform on
-[github.com/mtxr/kevin/releases](https://github.com/mtxr/kevin/releases),
-plus a `SHA256SUMS` file. Pick the one for your system:
-
-| Platform              | Asset                                   |
-|-----------------------|-----------------------------------------|
-| macOS, Apple silicon  | `kevin-<version>-aarch64-macos.tar.gz`  |
-| macOS, Intel          | `kevin-<version>-x86_64-macos.tar.gz`   |
-| Linux, x86_64         | `kevin-<version>-x86_64-linux.tar.gz`   |
-| Linux, arm64          | `kevin-<version>-aarch64-linux.tar.gz`  |
-| Windows, x86_64       | `kevin-<version>-x86_64-windows.zip`    |
-
-Each archive contains a single `kevin` binary (`kevin.exe` on Windows), the
-`LICENSE` and this README. On macOS and Linux:
+macOS and Linux:
 
 ```sh
-VERSION=v0.1.0              # see the releases page for the latest one
-TARGET=aarch64-macos        # x86_64-macos, x86_64-linux or aarch64-linux
-BASE="https://github.com/mtxr/kevin/releases/download/$VERSION"
-
-curl -fsSLO "$BASE/kevin-$VERSION-$TARGET.tar.gz"
-curl -fsSLO "$BASE/SHA256SUMS"
-grep "kevin-$VERSION-$TARGET.tar.gz" SHA256SUMS | shasum -a 256 -c -   # use sha256sum -c on Linux
-tar -xzf "kevin-$VERSION-$TARGET.tar.gz"
-install -m 0755 "kevin-$VERSION-$TARGET/kevin" ~/.local/bin/kevin      # any directory on your PATH
-kevin --version
+curl -fsSL https://raw.githubusercontent.com/mtxr/kevin/main/install.sh | sh
 ```
 
-On Windows (PowerShell), download the `.zip`, extract it and put `kevin.exe` in
-a directory on your `PATH`:
+It picks the archive for your system from the
+[latest release](https://github.com/mtxr/kevin/releases/latest), verifies its
+checksum and installs `kevin` into `~/.local/bin` (set `KEVIN_INSTALL_DIR` to
+change it, or `KEVIN_VERSION=v0.1.0` to pin a version).
 
-```powershell
-$Version = "v0.1.0"
-$Name = "kevin-$Version-x86_64-windows"
-Invoke-WebRequest "https://github.com/mtxr/kevin/releases/download/$Version/$Name.zip" -OutFile "$Name.zip"
-Expand-Archive "$Name.zip" -DestinationPath .
-```
+Windows: download `kevin-<version>-x86_64-windows.zip` from the
+[releases page](https://github.com/mtxr/kevin/releases/latest), extract it and
+put `kevin.exe` on your `PATH`. Every release also has a `SHA256SUMS` file and
+the other archives (`aarch64-macos`, `x86_64-macos`, `x86_64-linux`,
+`aarch64-linux`) if you prefer to download by hand.
 
-The binaries are not code-signed. If macOS refuses to open a binary you
-downloaded with a browser, run `xattr -d com.apple.quarantine kevin` once
-(downloading with `curl` as above does not need it). Package managers are not
-available yet.
+The binaries are not code-signed. If macOS refuses to open one downloaded with
+a browser, run `xattr -d com.apple.quarantine kevin` once (the installer does
+not need it). Package managers are not available yet.
+
+### Updating
+
+`kevin --check-update` tells you whether a newer release exists (it only asks
+GitHub, using `curl`; nothing is downloaded). To update, run the install command
+again.
 
 ### From source
 

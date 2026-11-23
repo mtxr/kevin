@@ -307,6 +307,7 @@ pub fn printRootHelp(arena: Allocator, w: *Io.Writer, root: *const Command, sour
         .{ .left = "-o, --output <PATH>", .right = "With --from: write the result to a new file" },
         .{ .left = "-j, --jobs <N>", .right = "Max scripts running at once (default: CPU count, or $KEVIN_JOBS)" },
         .{ .left = "    --completion <shell>", .right = "Print a completion script (zsh, bash or fish): eval \"$(kevin --completion zsh)\"" },
+        .{ .left = "    --check-update", .right = "Check whether a newer release exists (downloads nothing)" },
         .{ .left = "    --introspect", .right = "Print the command tree as JSON" },
         .{ .left = "    --explain", .right = "Show how the command resolves and what would run, without running it" },
         .{ .left = "-V, --version", .right = "Print the kevin version" },

@@ -8,7 +8,7 @@ Use kevin when project tasks (test, lint, build, release, setup) should live in 
 
 ## Docs
 
-- [README](https://raw.githubusercontent.com/mtxr/kevin/main/README.md): overview, install from the releases page, syntax, flags, dependencies, runtimes, comparison with make, just, mask and xc, known limitations
+- [README](https://raw.githubusercontent.com/mtxr/kevin/main/README.md): overview, one-line install, syntax, flags, dependencies, runtimes, comparison with make, just, mask and xc, known limitations
 - [Guide for coding agents](https://raw.githubusercontent.com/mtxr/kevin/main/docs/for-agents.md): how to discover, preview, run and write kevin tasks, plus a snippet for AGENTS.md or CLAUDE.md
 - [Agent skill](https://raw.githubusercontent.com/mtxr/kevin/main/skills/kevin/SKILL.md): a SKILL.md that teaches an agent the kevin syntax and workflow
 
