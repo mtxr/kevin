@@ -6,6 +6,7 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const cli = @import("cli.zig");
 const runner = @import("runner.zig");
+const proc = @import("proc.zig");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const Command = ast.Command;
@@ -185,6 +186,13 @@ pub const Ctx = struct {
     slots: Io.Semaphore,
 };
 
+/// How many kevin processes are already above this one (`KEVIN_DEPTH` of the
+/// environment kevin was started in). Set once by main; children get depth + 1.
+pub var depth: u32 = 0;
+
+/// Nesting limit: a task that keeps calling itself through `$KEVIN` stops here.
+pub const max_depth: u32 = 32;
+
 /// Variables kevin adds on top of the inherited environment for `node`.
 pub fn injectedVars(
     arena: Allocator,
@@ -199,6 +207,7 @@ pub fn injectedVars(
     try out.append(arena, .{ .name = "KEVIN", .value = try std.fmt.allocPrint(arena, "{s} --file {s}", .{ exe, cmd.source_path }) });
     try out.append(arena, .{ .name = "KEVIN_DIR", .value = std.fs.path.dirname(cmd.source_path) orelse "." });
     try out.append(arena, .{ .name = "KEVIN_JOBS", .value = try std.fmt.allocPrint(arena, "{d}", .{jobs}) });
+    try out.append(arena, .{ .name = "KEVIN_DEPTH", .value = try std.fmt.allocPrint(arena, "{d}", .{depth + 1}) });
     if (verbose) {
         try out.append(arena, .{ .name = "verbose", .value = "true" });
         try out.append(arena, .{ .name = "KEVIN_VERBOSE", .value = "true" });
@@ -247,24 +256,74 @@ fn runSync(ctx: *Ctx, node: *Node) u8 {
     return 0;
 }
 
-fn asyncRun(ctx: *Ctx, dep: *Node, group_slots: *Io.Semaphore) Io.Cancelable!void {
-    group_slots.waitUncancelable(ctx.io);
-    defer group_slots.post(ctx.io);
-    _ = execute(ctx, dep);
+/// State shared by the tasks of one `RunDeps: async` group.
+const Group = struct {
+    /// Dependencies of the group are cancelled through this scope.
+    scope: proc.Scope,
+    /// Max number of group members running at once (`Jobs:`).
+    slots: Io.Semaphore,
+    /// Exit code of the first dependency that failed (0 = none yet).
+    first_failure: std.atomic.Value(u8) = .init(0),
+};
+
+/// Runs one member of a group. The caller already took one of the group's
+/// `Jobs:` slots, in declaration order; it is released here when the member ends.
+fn asyncRun(ctx: *Ctx, dep: *Node, group: *Group) Io.Cancelable!void {
+    defer group.slots.post(ctx.io);
+    // Fail-fast: a sibling failed while this one was being started.
+    if (group.scope.isCancelled()) return;
+
+    const prev = proc.enterScope(&group.scope);
+    defer proc.leaveScope(prev);
+    const code = execute(ctx, dep);
+    if (code != 0 and group.first_failure.cmpxchgStrong(0, code, .acq_rel, .acquire) == null) {
+        // First failure: stop the siblings that are still running.
+        group.scope.cancel();
+    }
 }
 
-/// Starts every dependency (at most `Jobs:` at a time), waits for all of them
-/// and reports the first failure in declaration order.
+/// Starts every dependency (at most `Jobs:` at a time) and waits for all of
+/// them. When one fails, the running siblings get SIGTERM, pending ones do not
+/// start, and the exit code of the first failure is returned.
 fn runAsync(ctx: *Ctx, node: *Node) u8 {
-    var group: Io.Group = .init;
-    var group_slots: Io.Semaphore = .{ .permits = node.jobs orelse node.deps.len };
+    var io_group: Io.Group = .init;
+    var group: Group = .{
+        .scope = .{ .parent = proc.currentScope() },
+        .slots = .{ .permits = node.jobs orelse node.deps.len },
+    };
     for (node.deps) |dep| {
+        // Slots are taken here, in declaration order, so with `Jobs: N` the first N
+        // dependencies start first and the pending ones start only as slots free up.
+        group.slots.waitUncancelable(ctx.io);
+        if (group.scope.isCancelled()) {
+            group.slots.post(ctx.io);
+            break;
+        }
         if (ctx.verbose) std.debug.print("+ {s} requires {s} (async)\n", .{ node.cmd.name, dep.cmd.name });
-        group.async(ctx.io, asyncRun, .{ ctx, dep, &group_slots });
+        io_group.async(ctx.io, asyncRun, .{ ctx, dep, &group });
     }
-    group.await(ctx.io) catch {};
-    for (node.deps) |dep| if (dep.code != 0) return dep.code;
+    io_group.await(ctx.io) catch {};
+    const first = group.first_failure.load(.acquire);
+    if (first != 0) return first;
+    // Nothing failed by itself, but the whole group may have been stopped from outside.
+    if (group.scope.isCancelled()) return proc.stopped_code;
     return 0;
+}
+
+/// Number of nodes in the tree below `node` (shared `Run: once` nodes count once).
+/// Bounds how many threads the async runtime may need.
+pub fn countNodes(arena: Allocator, node: *const Node) Allocator.Error!usize {
+    var seen: std.AutoHashMapUnmanaged(*const Node, void) = .empty;
+    return countInto(arena, &seen, node);
+}
+
+fn countInto(arena: Allocator, seen: *std.AutoHashMapUnmanaged(*const Node, void), node: *const Node) Allocator.Error!usize {
+    if (node.once) {
+        if ((try seen.getOrPut(arena, node)).found_existing) return 0;
+    }
+    var n: usize = 1;
+    for (node.deps) |d| n += try countInto(arena, seen, d);
+    return n;
 }
 
 // -------------------------------------------------------------------- tests
@@ -368,4 +427,54 @@ test "invalid requirements fail before anything runs" {
     const badargs = try buildFor(arena, "## > a\n\nRequires: b\n\n```sh\ntrue\n```\n\n## > b (x)\n\n```sh\ntrue\n```\n", "a", &.{});
     try testing.expect(badargs.node == null);
     try testing.expect(std.mem.indexOf(u8, badargs.builder.err, "missing required argument <x>") != null);
+}
+
+test "injected variables carry the nesting depth" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const root = (try parser.parseSource(arena, "/t.md", "## > a\n\n```sh\ntrue\n```\n")).root;
+    const saved = depth;
+    defer depth = saved;
+    depth = 4;
+    const vars = try injectedVars(arena, "/bin/kevin", root.find("a").?, &.{}, false, 2);
+    for (vars) |v| {
+        if (std.mem.eql(u8, v.name, "KEVIN_DEPTH")) return try testing.expectEqualStrings("5", v.value);
+    }
+    return error.TestUnexpectedResult;
+}
+
+test "countNodes counts shared once-nodes a single time" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const src =
+        \\## > setup
+        \\
+        \\Run: once
+        \\
+        \\```sh
+        \\true
+        \\```
+        \\
+        \\## > a
+        \\
+        \\Requires: setup
+        \\
+        \\```sh
+        \\true
+        \\```
+        \\
+        \\## > b
+        \\
+        \\Requires: setup, a
+        \\
+        \\```sh
+        \\true
+        \\```
+        \\
+    ;
+    const r = try buildFor(arena, src, "b", &.{});
+    // b, setup (once), a (setup already counted).
+    try testing.expectEqual(@as(usize, 3), try countNodes(arena, r.node.?));
 }

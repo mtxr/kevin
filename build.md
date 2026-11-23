@@ -141,13 +141,67 @@ printf '## Tasks\n\n### t\n\n%ssh\necho tagged\n%s\n' "$fence" "$fence" > "$tmp/
 $bin --from xc -f "$tmp/xc-tagged.md" 2>/dev/null | grep -q '^set -e$' || { echo "smoke: xc tagged block without set -e"; exit 1; }
 $bin --from xc -f "$tmp/xc-tagged.md" 2>/dev/null | grep -q 'KEVIN_DIR" || exit 1$' || { echo "smoke: xc cd does not abort on failure"; exit 1; }
 
+# Process handling: stdin, temp scripts, signals, fail-fast, --jobs and recursion.
+proc=examples/process.md
+[ "$(echo hi | $bin -f $proc read-stdin)" = "got=hi" ] || { echo "smoke: block did not inherit stdin"; exit 1; }
+[ "$($bin -f $proc script-path)" = "file" ] || { echo "smoke: block did not run from a temp file"; exit 1; }
+mkdir "$tmp/tmpdir"
+TMPDIR="$tmp/tmpdir" $bin -f $proc script-path >/dev/null
+[ -z "$(ls -A "$tmp/tmpdir")" ] || { echo "smoke: temp directory left behind"; exit 1; }
+# A block larger than the kernel's single-argument limit (128 KiB on Linux).
+{ printf '## > big\n\n```sh\n# '; head -c 300000 /dev/zero | tr '\0' 'x'; printf '\necho big-ok\n```\n'; } > "$tmp/big.md"
+[ "$($bin -f "$tmp/big.md" big)" = "big-ok" ] || { echo "smoke: large block failed"; exit 1; }
+
+# SIGTERM is forwarded to the running child and its subtree; kevin exits 143.
+mkdir "$tmp/sig"
+TMPDIR="$tmp/tmpdir" $bin -f $proc hang "$tmp/sig" </dev/null >/dev/null 2>&1 &
+kpid=$!
+for _ in $(seq 1 50); do [ -s "$tmp/sig/hang.pid" ] && break; sleep 0.1; done
+[ -s "$tmp/sig/hang.pid" ] || { echo "smoke: hang task did not start"; exit 1; }
+cpid=$(cat "$tmp/sig/hang.pid")
+kill -TERM "$kpid"
+set +e
+wait "$kpid"
+rc=$?
+set -e
+[ "$rc" = "143" ] || { echo "smoke: SIGTERM exit code was $rc"; exit 1; }
+sleep 0.2
+if kill -0 "$cpid" 2>/dev/null; then kill "$cpid"; echo "smoke: child survived SIGTERM"; exit 1; fi
+[ -z "$(ls -A "$tmp/tmpdir")" ] || { echo "smoke: temp directory left behind after SIGTERM"; exit 1; }
+
+# A failing async dependency stops running siblings and starts no pending ones.
+mkdir "$tmp/ff"
+set +e
+$bin -f $proc failfast "$tmp/ff" >/dev/null 2>&1
+rc=$?
+set -e
+[ "$rc" = "9" ] || { echo "smoke: fail-fast exit code was $rc"; exit 1; }
+sleep 0.3
+[ ! -e "$tmp/ff/slow-finished" ] || { echo "smoke: running sibling was not stopped"; exit 1; }
+[ ! -e "$tmp/ff/late-started" ] || { echo "smoke: pending sibling started after a failure"; exit 1; }
+
+# --jobs bounds concurrency in both directions.
+mkdir "$tmp/j12" "$tmp/j2"
+$bin -j 12 -f $proc probes-12 "$tmp/j12"
+[ "$(sort -n "$tmp/j12/peaks" | tail -n 1)" -ge 8 ] || { echo "smoke: -j 12 did not run the dependencies together"; exit 1; }
+$bin -j 2 -f $proc probes-4 "$tmp/j2"
+[ "$(sort -n "$tmp/j2/peaks" | tail -n 1)" -le 2 ] || { echo "smoke: -j 2 ran more than two at once"; exit 1; }
+
+# A task that calls itself through $KEVIN stops at the nesting limit.
+set +e
+msg=$($bin -f $proc recurse 2>&1)
+rc=$?
+set -e
+[ "$rc" = "2" ] || { echo "smoke: recursion ended with $rc"; exit 1; }
+case "$msg" in *'kevin runs deep'*) ;; *) echo "smoke: no recursion message: $msg"; exit 1 ;; esac
+
 # --introspect prints the command tree as JSON.
 intro=$($bin -f examples/tasks.md --introspect)
 case "$intro" in *'"name": "hello"'*'"required": true'*) ;; *) echo "smoke: introspect output mismatch"; exit 1 ;; esac
 
 # --explain describes a command without running it; --version prints the version.
 exp=$($bin -f examples/tasks.md --explain hello World -t 2)
-case "$exp" in *'name (required) = World'*'argv:    bash -c <code>'*) ;; *) echo "smoke: explain output mismatch"; exit 1 ;; esac
+case "$exp" in *'name (required) = World'*'argv:    bash <temp file>'*) ;; *) echo "smoke: explain output mismatch"; exit 1 ;; esac
 $bin -f examples/tasks.md --explain hello World -t abc >/dev/null 2>&1 && { echo "smoke: explain accepted bad input"; exit 1; }
 case "$($bin --version)" in "kevin "*) ;; *) echo "smoke: unexpected version output"; exit 1 ;; esac
 

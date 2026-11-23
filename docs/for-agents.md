@@ -31,7 +31,8 @@ kevin --explain <command> [args...]
 
 Prints the resolved command, validated arguments and flags, the variables kevin
 injects, the dependency tree, and for each code block whether it would run, which
-runtime was found and the final argv, without executing anything. Exit code 2
+runtime was found and the launcher (`<interpreter> <temp file>`), without executing
+anything or creating files. Exit code 2
 means the arguments are invalid, 127 means a required runtime is missing.
 
 ## Run
@@ -47,7 +48,11 @@ kevin <command> [args...] [--flag value]
   `sh`, `bash` and `zsh` blocks (`$0` is `kevin`; trailing optional arguments
   that were not given are left out). There are no variadic arguments. A flag
   that is absent or false is unset, never inherited from the caller.
-- `-v` echoes each code block before running it. `-j N` caps concurrent scripts.
+- Blocks run from a private temp file (`sh <file>`), so stdin stays free for the
+  script. SIGINT, SIGTERM and SIGHUP are forwarded to running scripts and kevin
+  exits with 128 plus the signal; a second signal kills them. A task calling
+  itself through `$KEVIN` is stopped at `KEVIN_DEPTH` 32 (exit 2).
+- `-v` echoes each code block before running it. `-j N` caps concurrent scripts exactly (`-j 40` really runs 40 at once).
 - Global flags (`-f/--file`, `-j/--jobs`, `--explain`, `--introspect`,
   `--version`) must come before the command name.
 
@@ -81,7 +86,8 @@ RunDeps: async
   `choices:`, `desc:` and `required`.
 - `Requires:` takes comma separated entries, each a command and its arguments
   (`$name` is expanded from the current command's arguments). `RunDeps: async`
-  runs them concurrently, `Run: once` dedupes, `Jobs: N` limits concurrency.
+  runs them concurrently and stops the siblings (SIGTERM) when one fails;
+  `Run: once` dedupes, `Jobs: N` limits concurrency.
 - Several code blocks under one command run in order and stop at the first
   failure. Blocks without a language, or in data languages (`json`, `yaml`,
   `md`), are ignored. Inside a fenced block everything is literal.
