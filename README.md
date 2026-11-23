@@ -249,9 +249,9 @@ Every command also accepts `-h/--help` (generated from the file) and
 
 ## Dependencies
 
-A command can require other commands. Put `Requires:` (and optionally
-`RunDeps:`, `Run:` and `Jobs:`) lines under the heading, before the first code
-block. They work on `>` commands and on inline tasks. A command with only
+A command can require other commands. Put `Requires:` lines under the
+heading, before the first code block; `RunDeps:`, `Run:` and `Jobs:` lines are
+optional. They work on `>` commands and on inline tasks. A command with only
 `Requires:` and no code block is a runnable group.
 
 ````md
@@ -300,6 +300,21 @@ pre-flight check. Like the other global flags it goes before the command name.
 ```sh
 kevin --explain hello World -t 2 -c red
 ```
+
+## Shell completion
+
+kevin completes command names, subcommands, flags and `choices:` values from
+the Markdown file of the current directory. Add one line to your shell config:
+
+```sh
+eval "$(kevin --completion zsh)"      # ~/.zshrc (after compinit)
+eval "$(kevin --completion bash)"     # ~/.bashrc
+kevin --completion fish | source      # ~/.config/fish/config.fish
+```
+
+The script calls back into `kevin` at tab time, so new tasks show up without
+regenerating anything. Command descriptions are shown where the shell supports
+them (zsh and fish).
 
 ## Environment
 

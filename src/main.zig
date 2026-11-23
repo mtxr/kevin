@@ -9,6 +9,7 @@ const migrate = @import("migrate.zig");
 const explain = @import("explain.zig");
 const deps = @import("deps.zig");
 const introspect = @import("introspect.zig");
+const complete = @import("complete.zig");
 const build_options = @import("build_options");
 
 test {
@@ -20,6 +21,7 @@ test {
     _ = explain;
     _ = deps;
     _ = introspect;
+    _ = complete;
 }
 
 const default_files = [_][]const u8{ "readme.md", "tasks.md", "build.md" };
@@ -65,6 +67,8 @@ pub fn main(init: std.process.Init) !u8 {
     var explain_flag = false;
     var introspect_flag = false;
     var jobs_arg: ?[]const u8 = null;
+    // Hidden: `--complete <words...>` feeds the shell completion scripts.
+    var complete_words: ?[]const []const u8 = null;
     var tokens: std.ArrayList([]const u8) = .empty;
     var i: usize = 1;
     while (i < argv.len) : (i += 1) {
@@ -81,6 +85,18 @@ pub fn main(init: std.process.Init) !u8 {
             try w.interface.print("kevin {s}\n", .{build_options.version});
             try w.interface.flush();
             return 0;
+        } else if (std.mem.eql(u8, a, "--completion")) {
+            i += 1;
+            const shell = if (i < argv.len) std.meta.stringToEnum(complete.Shell, argv[i]) else null;
+            if (shell == null) return fail("--completion requires 'zsh', 'bash' or 'fish'", .{});
+            var buf: [4096]u8 = undefined;
+            var w = Io.File.stdout().writer(io, &buf);
+            try w.interface.writeAll(complete.script(shell.?));
+            try w.interface.flush();
+            return 0;
+        } else if (std.mem.eql(u8, a, "--complete")) {
+            complete_words = @ptrCast(argv[i + 1 ..]);
+            break;
         } else if (std.mem.eql(u8, a, "-j") or std.mem.eql(u8, a, "--jobs")) {
             i += 1;
             if (i >= argv.len) return fail("{s} requires a number", .{a});
@@ -139,11 +155,19 @@ pub fn main(init: std.process.Init) !u8 {
         try ast.merge(arena, root, parsed.root, &warnings);
         try sources.append(arena, abs);
     }
-    for (warnings.items) |w| std.debug.print("kevin: warning: {s}\n", .{w});
+    if (complete_words == null) {
+        for (warnings.items) |w| std.debug.print("kevin: warning: {s}\n", .{w});
+    }
 
     var out_buf: [4096]u8 = undefined;
     var out_file = Io.File.stdout().writer(io, &out_buf);
     const out = &out_file.interface;
+
+    if (complete_words) |words| {
+        try complete.candidates(arena, out, root, words);
+        try out.flush();
+        return 0;
+    }
 
     if (names.len == 0) {
         var only_help = tokens.items.len > 0;

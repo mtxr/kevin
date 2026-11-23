@@ -107,6 +107,9 @@ case "$msg" in *'no README.md, tasks.md or build.md found'*) ;; *) echo "smoke: 
 [ "$(name=Bob $bin -f examples/regressions.md optional-arg claude)" = "name=[claude]" ] || { echo "smoke: optional argument not passed"; exit 1; }
 [ "$($bin -f examples/regressions.md positional a)" = "count=1 first=[a] second=[]" ] || { echo "smoke: positional parameters (one argument)"; exit 1; }
 [ "$($bin -f examples/regressions.md positional a b)" = "count=2 first=[a] second=[b]" ] || { echo "smoke: positional parameters (two arguments)"; exit 1; }
+$bin -f examples/tasks.md --complete hel | grep -q "^hello" || { echo "smoke: completion of a command name"; exit 1; }
+$bin -f examples/tasks.md --complete "" | grep -q . || { echo "smoke: completion lists commands"; exit 1; }
+for sh in zsh bash fish; do $bin --completion $sh | grep -q kevin || { echo "smoke: completion script for $sh"; exit 1; }; done
 
 # --introspect prints the command tree as JSON.
 intro=$($bin -f examples/tasks.md --introspect)
