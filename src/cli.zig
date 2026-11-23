@@ -78,11 +78,34 @@ fn looksNumeric(s: []const u8) bool {
     return true;
 }
 
+/// One word of an invocation. A `value` token comes from variable expansion
+/// (see `deps.zig`): it is always a positional argument, or the value of the
+/// flag right before it, and is never read as `--`, `-h`, `-v` or a flag.
+pub const Token = struct {
+    text: []const u8,
+    value: bool = false,
+};
+
 /// On failure returns `error.Usage` and sets `err_msg`.
 pub fn parseInvocation(
     arena: Allocator,
     cmd: *const Command,
-    tokens: []const []const u8,
+    words: []const []const u8,
+    err_msg: *[]const u8,
+) (Allocator.Error || error{Usage})!Invocation {
+    const tokens = try arena.alloc(Token, words.len);
+    for (words, tokens) |w, *t| t.* = .{ .text = w };
+    return parseTokens(arena, cmd, tokens, false, err_msg);
+}
+
+/// Like `parseInvocation` for already split tokens. With `quiet_implicit`
+/// (dependencies) `-h`/`--help` are ignored instead of requesting help, so a
+/// dependency never stops at its help screen.
+pub fn parseTokens(
+    arena: Allocator,
+    cmd: *const Command,
+    tokens: []const Token,
+    quiet_implicit: bool,
     err_msg: *[]const u8,
 ) (Allocator.Error || error{Usage})!Invocation {
     var inv: Invocation = .{};
@@ -94,8 +117,8 @@ pub fn parseInvocation(
     var i: usize = 0;
     var only_positional = false;
     while (i < tokens.len) : (i += 1) {
-        const tok = tokens[i];
-        if (only_positional or tok.len < 2 or tok[0] != '-') {
+        const tok = tokens[i].text;
+        if (only_positional or tokens[i].value or tok.len < 2 or tok[0] != '-') {
             try positionals.append(arena, tok);
             continue;
         }
@@ -112,7 +135,7 @@ pub fn parseInvocation(
             if (findLong(cmd, name)) |fi| {
                 try setFlag(arena, &values[fi], flags[fi], inline_val, tokens, &i, err_msg);
             } else if (std.mem.eql(u8, name, "help")) {
-                inv.help = true;
+                inv.help = !quiet_implicit;
             } else if (std.mem.eql(u8, name, "verbose")) {
                 inv.verbose = true;
             } else {
@@ -146,7 +169,7 @@ pub fn parseInvocation(
                 try setFlag(arena, &values[fi], f, rest, tokens, &i, err_msg);
                 break;
             } else if (ch == 'h') {
-                inv.help = true;
+                inv.help = !quiet_implicit;
             } else if (ch == 'v') {
                 inv.verbose = true;
             } else {
@@ -226,7 +249,7 @@ fn setFlag(
     slot: *?[]const u8,
     f: Flag,
     inline_val: ?[]const u8,
-    tokens: []const []const u8,
+    tokens: []const Token,
     i: *usize,
     err_msg: *[]const u8,
 ) (Allocator.Error || error{Usage})!void {
@@ -243,7 +266,7 @@ fn setFlag(
         return error.Usage;
     }
     i.* += 1;
-    slot.* = tokens[i.*];
+    slot.* = tokens[i.*].text;
 }
 
 fn flagLabel(f: Flag) []const u8 {

@@ -67,20 +67,31 @@ pub const Builder = struct {
         for (spec.requires.items) |entry| {
             const raw = try splitWords(self.arena, entry);
             if (raw.len == 0) continue;
-            const words = try self.arena.alloc([]const u8, raw.len);
-            for (raw, words) |r, *w| w.* = try expandVars(self.arena, r, env);
+            const words = try self.arena.alloc(Word, raw.len);
+            for (raw, words) |r, *w| w.* = try expandWord(self.arena, r, env);
 
-            const r = try cli.resolve(self.arena, self.root, words);
+            // The command path comes only from the leading words written
+            // literally; everything after is argument material.
+            var n_path: usize = 0;
+            while (n_path < words.len and words[n_path].literal) n_path += 1;
+            const path_words = try self.arena.alloc([]const u8, n_path);
+            for (words[0..n_path], path_words) |w, *p| p.* = w.text;
+
+            const r = try cli.resolve(self.arena, self.root, path_words);
             if (r.cmd == self.root) {
-                self.err = try std.fmt.allocPrint(self.arena, "unknown task '{s}' in the Requires of '{s}'", .{ words[0], cmd.name });
+                self.err = try std.fmt.allocPrint(self.arena, "unknown task '{s}' in the Requires of '{s}'", .{ words[0].text, cmd.name });
                 return error.Invalid;
             }
             if (!r.cmd.hasWork()) {
                 self.err = try std.fmt.allocPrint(self.arena, "'{s}', required by '{s}', has nothing to run", .{ r.cmd.name, cmd.name });
                 return error.Invalid;
             }
+            const tokens = try self.arena.alloc(cli.Token, r.rest.len + words.len - n_path);
+            for (r.rest, tokens[0..r.rest.len]) |t, *o| o.* = .{ .text = t };
+            for (words[n_path..], tokens[r.rest.len..]) |w, *o| o.* = .{ .text = w.text, .value = !w.syntax };
+
             var msg: []const u8 = "";
-            const inv = cli.parseInvocation(self.arena, r.cmd, r.rest, &msg) catch |e| switch (e) {
+            const inv = cli.parseTokens(self.arena, r.cmd, tokens, true, &msg) catch |e| switch (e) {
                 error.Usage => {
                     self.err = try std.fmt.allocPrint(self.arena, "Requires '{s}' of '{s}': {s}", .{ entry, cmd.name, msg });
                     return error.Invalid;
@@ -103,6 +114,26 @@ pub const Builder = struct {
         return node;
     }
 };
+
+/// A word of a `Requires:` entry after expansion.
+pub const Word = struct {
+    text: []const u8,
+    /// Written without any `$` expansion: it may name a command.
+    literal: bool,
+    /// May be read as CLI syntax (flag, `--`): literal words, and words whose
+    /// literal prefix starts with `-` such as `--port=$p`. Every other word
+    /// holds expanded data and is only ever a positional value.
+    syntax: bool,
+};
+
+/// Expands `$name` / `${name}` in `raw` and records whether the result may be
+/// read as syntax. The decision uses the text written in the file, never the
+/// expanded value.
+pub fn expandWord(arena: Allocator, raw: []const u8, env: []const cli.EnvPair) Allocator.Error!Word {
+    const text = try expandVars(arena, raw, env);
+    const dollar = std.mem.indexOfScalar(u8, raw, '$') orelse return .{ .text = text, .literal = true, .syntax = true };
+    return .{ .text = text, .literal = false, .syntax = dollar > 0 and raw[0] == '-' };
+}
 
 /// Splits on whitespace, honouring '...' and "..." quotes.
 pub fn splitWords(arena: Allocator, s: []const u8) Allocator.Error![]const []const u8 {
@@ -477,4 +508,113 @@ test "countNodes counts shared once-nodes a single time" {
     const r = try buildFor(arena, src, "b", &.{});
     // b, setup (once), a (setup already counted).
     try testing.expectEqual(@as(usize, 3), try countNodes(arena, r.node.?));
+}
+
+const structured_src =
+    \\## > build (target)
+    \\
+    \\**OPTIONS**
+    \\* dry_run
+    \\    * flags: -n --dry-run
+    \\
+    \\```sh
+    \\true
+    \\```
+    \\
+    \\### > docs
+    \\
+    \\```sh
+    \\true
+    \\```
+    \\
+    \\## > deploy (target)
+    \\
+    \\Requires: build $target
+    \\
+    \\```sh
+    \\true
+    \\```
+    \\
+    \\## > serve (flag)
+    \\
+    \\Requires: build x --dry-run, build x --dry-run=$flag
+    \\
+    \\```sh
+    \\true
+    \\```
+    \\
+;
+
+fn structuredDep(arena: Allocator, value: []const u8) !*Node {
+    const r = try buildFor(arena, structured_src, "deploy", &.{.{ .name = "target", .value = value }});
+    const node = r.node orelse {
+        std.debug.print("unexpected error: {s}\n", .{r.builder.err});
+        return error.TestUnexpectedResult;
+    };
+    try testing.expectEqual(@as(usize, 1), node.deps.len);
+    return node.deps[0];
+}
+
+fn expectNoDryRun(dep: *const Node) !void {
+    for (dep.env) |p| try testing.expect(!std.mem.eql(u8, p.name, "dry_run"));
+}
+
+test "a value naming a subcommand is an argument, not the subcommand" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const dep = try structuredDep(arena_state.allocator(), "docs");
+    try testing.expectEqualStrings("build", dep.cmd.name);
+    try testing.expectEqualStrings("docs", dep.env[0].value);
+}
+
+test "a --help value is passed as data and never requests help" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    for ([_][]const u8{ "--help", "-h", "-v", "--" }) |v| {
+        const dep = try structuredDep(arena_state.allocator(), v);
+        try testing.expectEqualStrings("target", dep.env[0].name);
+        try testing.expectEqualStrings(v, dep.env[0].value);
+    }
+}
+
+test "a -n value does not set a flag on the dependency" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const dep = try structuredDep(arena_state.allocator(), "-n");
+    try testing.expectEqualStrings("-n", dep.env[0].value);
+    try expectNoDryRun(dep);
+}
+
+test "an empty value stays an empty positional argument" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const dep = try structuredDep(arena_state.allocator(), "");
+    try testing.expectEqualStrings("target", dep.env[0].name);
+    try testing.expectEqualStrings("", dep.env[0].value);
+}
+
+test "literal flags and flags with expanded values still work" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const r = try buildFor(arena, structured_src, "serve", &.{.{ .name = "flag", .value = "true" }});
+    const node = r.node.?;
+    try testing.expectEqual(@as(usize, 2), node.deps.len);
+    for (node.deps) |dep| {
+        for (dep.env) |p| {
+            if (std.mem.eql(u8, p.name, "dry_run")) {
+                try testing.expectEqualStrings("true", p.value);
+                break;
+            }
+        } else return error.TestUnexpectedResult;
+    }
+}
+
+test "a command name cannot come from a variable" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const src = "## > a (t)\n\nRequires: $t\n\n```sh\ntrue\n```\n\n## > b\n\n```sh\ntrue\n```\n";
+    const r = try buildFor(arena, src, "a", &.{.{ .name = "t", .value = "b" }});
+    try testing.expect(r.node == null);
 }
