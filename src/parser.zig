@@ -74,7 +74,23 @@ pub const Parser = struct {
     /// Command still accepting `> description` lines.
     pending_desc: ?*Command = null,
     opt_target: ?*std.ArrayList(Flag) = null,
+    /// Command owning `opt_target` (null for flags declared before an inline task).
+    opt_cmd: ?*Command = null,
     opt_root_indent: ?usize = null,
+    /// The current OPTIONS item was rejected: its attribute lines are ignored.
+    opt_skipping: bool = false,
+
+    /// Attribute lines (`Requires:`...) are only recognised in the header zone:
+    /// right after the heading and its description, before any other paragraph,
+    /// list or code block.
+    header_zone: bool = false,
+    /// A code block was already added under the current heading.
+    have_block: bool = false,
+    /// A prose paragraph followed that block.
+    prose_since_block: bool = false,
+    /// Blocks are examples (not scripts) until one carries the `task` keyword.
+    in_examples: bool = false,
+    block_example: bool = false,
 
     fence_char: u8 = 0,
     fence_len: usize = 0,
@@ -94,7 +110,10 @@ pub const Parser = struct {
             pos = end + 1;
         }
         // Unterminated fence: the block runs until EOF.
-        if (self.state == .in_code_block) try self.closeBlock(self.src.len);
+        if (self.state == .in_code_block) {
+            try self.warn("code block opened on line {d} is not closed; it runs to the end of the file", .{self.block_line});
+            try self.closeBlock(self.src.len);
+        }
     }
 
     fn feed(self: *Parser, line: []const u8, line_start: usize, line_end: usize) Allocator.Error!void {
@@ -121,15 +140,10 @@ pub const Parser = struct {
         if (parseFence(line)) |f| return self.openFence(f, line_end);
         _ = line_start;
 
-        // `Requires:`, `RunDeps:`, `Run:` and `Jobs:` lines, until the first code block.
-        if (parseAttr(line)) |attr| attr_blk: {
-            if (self.stack_len == 0) break :attr_blk;
-            const top = self.stack[self.stack_len - 1];
-            const spec: *ast.DepSpec = if (top.cmd) |c| blk: {
-                if (c.blocks.items.len > 0) break :attr_blk;
-                break :blk &c.deps;
-            } else &self.pending_deps;
-            if (try self.applyDep(spec, attr)) return;
+        // `Requires:`, `RunDeps:`, `Run:` and `Jobs:` lines: plain lines in the header zone only.
+        const attr = parseAttrPlain(line);
+        if (attr != null and self.header_zone and self.stack_len > 0) {
+            if (try self.headerAttr(attr.?)) return;
         }
 
         const t = std.mem.trim(u8, line, " \t");
@@ -137,6 +151,8 @@ pub const Parser = struct {
             if (self.stack_len == 0) return;
             const top = self.stack[self.stack_len - 1];
             self.opt_target = if (top.cmd) |c| &c.flags else &self.pending_flags;
+            self.opt_cmd = top.cmd;
+            self.opt_skipping = false;
             self.opt_root_indent = null;
             self.state = .in_options;
             self.pending_desc = null;
@@ -161,6 +177,23 @@ pub const Parser = struct {
             }
         }
         self.pending_desc = null;
+        if (t[0] != '>') {
+            // Anything but a blockquote ends the header zone; attribute lines are not prose.
+            self.header_zone = false;
+            if (attr == null and self.have_block) self.prose_since_block = true;
+        }
+    }
+
+    /// Applies a header-zone attribute line; false means it is prose after all.
+    fn headerAttr(self: *Parser, attr: Attr) Allocator.Error!bool {
+        const top = self.stack[self.stack_len - 1];
+        const spec: *ast.DepSpec = if (top.cmd) |c| blk: {
+            if (c.blocks.items.len > 0) return false;
+            break :blk &c.deps;
+        } else &self.pending_deps;
+        if (try self.applyDep(spec, attr)) return true;
+        // xc-only attributes (`Directory:`...) are ignored but keep the zone open.
+        return !isDepAttr(attr.kind);
     }
 
     fn heading(self: *Parser, level: u8, text: []const u8) Allocator.Error!void {
@@ -168,6 +201,10 @@ pub const Parser = struct {
         self.pending_flags.clearRetainingCapacity();
         self.pending_deps = .{};
         self.pending_desc = null;
+        self.header_zone = true;
+        self.have_block = false;
+        self.prose_since_block = false;
+        self.in_examples = false;
 
         if (text.len > 0 and text[0] == '>') {
             if (try self.markedCommand(text[1..])) |cmd| {
@@ -203,7 +240,7 @@ pub const Parser = struct {
         }
         const cmd = try self.arena.create(Command);
         cmd.* = .{ .name = name, .source_path = self.source_path, .decl_line = self.line_no };
-        try parseParams(self.arena, rest[name_end..], &cmd.args);
+        try self.parseParams(rest[name_end..], cmd);
 
         const parent = self.nearestParent();
         if (parent.findIndex(name)) |idx| {
@@ -227,14 +264,25 @@ pub const Parser = struct {
         self.block_start = @min(line_end + 1, self.src.len);
         self.block_line = self.line_no;
         self.block_target = null;
+        self.block_example = false;
         self.pending_desc = null;
+        self.header_zone = false;
         const deps_spec = self.pending_deps;
         self.pending_deps = .{};
 
         const top: ?StackEntry = if (self.stack_len > 0) self.stack[self.stack_len - 1] else null;
         if (top) |t| {
             if (t.cmd) |c| {
-                // Plain code block under a `>` command.
+                // Plain code block under a `>` command. After the first block, a block
+                // that follows prose is an example unless it carries the `task` keyword.
+                if (info.is_task) {
+                    self.in_examples = false;
+                } else if (self.have_block and (self.prose_since_block or self.in_examples)) {
+                    self.in_examples = true;
+                }
+                self.block_example = self.in_examples;
+                self.have_block = true;
+                self.prose_since_block = false;
                 self.block_target = c;
                 self.pending_flags.clearRetainingCapacity();
                 return;
@@ -265,18 +313,16 @@ pub const Parser = struct {
             if (existing.decl_line == decl_line and std.mem.eql(u8, existing.source_path, self.source_path)) {
                 // Several task blocks under the same heading form one pipeline.
                 self.block_target = existing;
-                try existing.flags.appendSlice(self.arena, self.pending_flags.items);
-                self.pending_flags.clearRetainingCapacity();
+                try self.attachFlags(existing);
                 return;
             }
             try self.warn("line {d}: duplicate command '{s}', the later definition wins", .{ self.line_no, name });
         }
         const cmd = try self.arena.create(Command);
         cmd.* = .{ .name = name, .source_path = self.source_path, .decl_line = decl_line };
-        try parseParams(self.arena, info.params, &cmd.args);
+        try self.parseParams(info.params, cmd);
         cmd.deps = deps_spec;
-        try cmd.flags.appendSlice(self.arena, self.pending_flags.items);
-        self.pending_flags.clearRetainingCapacity();
+        try self.attachFlags(cmd);
         if (parent.findIndex(name)) |idx| {
             parent.children.items[idx] = cmd;
         } else {
@@ -293,7 +339,63 @@ pub const Parser = struct {
             .lang = self.block_lang,
             .code = code,
             .line = self.block_line,
+            .example = self.block_example,
         });
+    }
+
+    /// Moves the flags declared before an inline task onto `cmd`, dropping names
+    /// that clash with its arguments or earlier flags.
+    fn attachFlags(self: *Parser, cmd: *Command) Allocator.Error!void {
+        for (self.pending_flags.items) |f| {
+            if (nameTaken(cmd, f.name)) {
+                try self.warn("line {d}: '{s}' is already declared as an argument or flag of '{s}'; the later declaration is ignored", .{ self.line_no, f.name, cmd.name });
+                continue;
+            }
+            try cmd.flags.append(self.arena, f);
+        }
+        self.pending_flags.clearRetainingCapacity();
+    }
+
+    /// Parses `(required)` and `[optional]` groups placed directly after the
+    /// name. Parsing stops at the first group that is not a single name, so
+    /// trailing prose such as `(slow, needs [network])` stays prose.
+    fn parseParams(self: *Parser, text: []const u8, cmd: *Command) Allocator.Error!void {
+        var i: usize = 0;
+        while (i < text.len) {
+            if (text[i] == ' ' or text[i] == '\t') {
+                i += 1;
+                continue;
+            }
+            const close: u8 = switch (text[i]) {
+                '(' => ')',
+                '[' => ']',
+                else => return,
+            };
+            const end = std.mem.indexOfScalarPos(u8, text, i + 1, close) orelse return;
+            const name = std.mem.trim(u8, text[i + 1 .. end], " \t");
+            i = end + 1;
+            if (name.len == 0 or std.mem.indexOfAny(u8, name, " \t,()[]") != null) return;
+            if (try self.checkName(cmd, name, "argument")) {
+                try cmd.args.append(self.arena, .{ .name = name, .required = close == ')' });
+            }
+        }
+    }
+
+    /// Validates a new argument or flag name; warns and returns false when it is rejected.
+    fn checkName(self: *Parser, cmd: ?*const Command, name: []const u8, what: []const u8) Allocator.Error!bool {
+        if (!validName(name)) {
+            try self.warn("line {d}: invalid {s} name '{s}' (use letters, digits and '_', not starting with a digit); ignored", .{ self.line_no, what, name });
+            return false;
+        }
+        if (reservedName(name)) {
+            try self.warn("line {d}: {s} name '{s}' is reserved (it would override an environment variable kevin or the shell relies on); ignored", .{ self.line_no, what, name });
+            return false;
+        }
+        if (cmd) |c| if (nameTaken(c, name)) {
+            try self.warn("line {d}: '{s}' is already declared as an argument or flag; the later declaration is ignored", .{ self.line_no, name });
+            return false;
+        };
+        return true;
     }
 
     // ---------------------------------------------------------------- options
@@ -316,10 +418,18 @@ pub const Parser = struct {
         };
         if (indent <= root_indent or target.items.len == 0) {
             const name = std.mem.trim(u8, item, " \t`");
+            self.opt_skipping = true;
             if (name.len == 0) return true;
+            if (!try self.checkName(self.opt_cmd, name, "flag")) return true;
+            for (target.items) |f| if (std.mem.eql(u8, f.name, name)) {
+                try self.warn("line {d}: flag '{s}' is declared twice; the later declaration is ignored", .{ self.line_no, name });
+                return true;
+            };
+            self.opt_skipping = false;
             try target.append(self.arena, .{ .name = name });
             return true;
         }
+        if (self.opt_skipping) return true;
         try self.flagAttr(&target.items[target.items.len - 1], item);
         return true;
     }
@@ -371,7 +481,7 @@ pub const Parser = struct {
             .requires => {
                 var it = std.mem.splitScalar(u8, attr.val, ',');
                 while (it.next()) |entry| {
-                    const e = stripDecor(entry);
+                    const e = std.mem.trim(u8, entry, " \t");
                     if (e.len > 0) try spec.requires.append(self.arena, e);
                 }
             },
@@ -490,12 +600,63 @@ const attr_names = [_]struct { []const u8, AttrKind }{
     .{ "interactive", .interactive },
 };
 
+/// True for the attributes kevin itself applies (the others are xc-only).
+pub fn isDepAttr(kind: AttrKind) bool {
+    return switch (kind) {
+        .requires, .run, .run_deps, .jobs => true,
+        else => false,
+    };
+}
+
+/// Environment variables kevin never lets a declaration override (exact case:
+/// variables are case-sensitive, so a lowercase `env` flag is fine).
+const reserved_env = [_][]const u8{
+    "PATH", "HOME", "IFS", "ENV", "BASH_ENV", "SHELL", "PWD", "OLDPWD", "USER", "LANG", "TMPDIR",
+};
+
+/// Names whose derived long flag (`--verbose`, `--help`) would clash with kevin's own flags.
+const reserved_flags = [_][]const u8{ "verbose", "help" };
+
+/// `[A-Za-z_][A-Za-z0-9_]*`: a name that is a valid shell variable.
+pub fn validName(name: []const u8) bool {
+    if (name.len == 0) return false;
+    if (!(std.ascii.isAlphabetic(name[0]) or name[0] == '_')) return false;
+    for (name[1..]) |c| if (!(std.ascii.isAlphanumeric(c) or c == '_')) return false;
+    return true;
+}
+
+pub fn reservedName(name: []const u8) bool {
+    if (std.mem.startsWith(u8, name, "KEVIN")) return true;
+    for (reserved_env) |r| if (std.mem.eql(u8, name, r)) return true;
+    for (reserved_flags) |r| if (std.ascii.eqlIgnoreCase(name, r)) return true;
+    return false;
+}
+
+fn nameTaken(cmd: *const Command, name: []const u8) bool {
+    for (cmd.args.items) |a| if (std.mem.eql(u8, a.name, name)) return true;
+    for (cmd.flags.items) |f| if (std.mem.eql(u8, f.name, name)) return true;
+    return false;
+}
+
 /// Strips spaces and Markdown emphasis characters (`_`, `*`, backticks).
 pub fn stripDecor(s: []const u8) []const u8 {
     return std.mem.trim(u8, s, " \t_*`");
 }
 
-/// Recognises `Key: value` attribute lines, tolerating `**Key**:` and `` `value` `` decoration.
+/// Recognises a plain `Key: value` attribute line: no emphasis, backticks or
+/// list markers around the key or value. This is what kevin files use.
+pub fn parseAttrPlain(line: []const u8) ?Attr {
+    const t = std.mem.trim(u8, line, " \t");
+    if (t.len == 0 or !std.ascii.isAlphabetic(t[0])) return null;
+    const colon = std.mem.indexOfScalar(u8, t, ':') orelse return null;
+    const key = std.mem.trim(u8, t[0..colon], " \t");
+    for (attr_names) |n| {
+        if (std.ascii.eqlIgnoreCase(key, n[0])) return .{ .kind = n[1], .val = std.mem.trim(u8, t[colon + 1 ..], " \t") };
+    }
+    return null;
+}
+
+/// Lenient variant for xc input (`--from xc`): tolerates `**Key**:` and `` `value` `` decoration.
 pub fn parseAttr(line: []const u8) ?Attr {
     const t = std.mem.trim(u8, line, " \t");
     const colon = std.mem.indexOfScalar(u8, t, ':') orelse return null;
@@ -536,22 +697,6 @@ fn parseInfo(info: []const u8) Info {
         pos = tok_end;
     }
     return res;
-}
-
-/// Parses `(required)` and `[optional]` groups.
-fn parseParams(arena: Allocator, text: []const u8, out: *std.ArrayList(Arg)) Allocator.Error!void {
-    var i: usize = 0;
-    while (i < text.len) : (i += 1) {
-        const close: u8 = switch (text[i]) {
-            '(' => ')',
-            '[' => ']',
-            else => continue,
-        };
-        const end = std.mem.indexOfScalarPos(u8, text, i + 1, close) orelse return;
-        const name = std.mem.trim(u8, text[i + 1 .. end], " \t");
-        if (name.len > 0) try out.append(arena, .{ .name = name, .required = close == ')' });
-        i = end;
-    }
 }
 
 fn dedent(arena: Allocator, code: []const u8, indent: usize) Allocator.Error![]const u8 {
@@ -887,8 +1032,8 @@ test "dependency attributes on marked and inline commands" {
         \\> Ship it
         \\
         \\Requires: test, build web
-        \\**RunDeps**: async
-        \\`Jobs`: 2
+        \\RunDeps: async
+        \\Jobs: 2
         \\Run: once
         \\
         \\```sh
@@ -940,8 +1085,8 @@ test "attribute-like prose is left alone and typos are reported" {
     const src =
         \\## > a
         \\
-        \\RunDeps: is described in the manual, see below
         \\RunDeps: asynch
+        \\RunDeps: is described in the manual, see below
         \\
         \\```sh
         \\true
@@ -954,6 +1099,177 @@ test "attribute-like prose is left alone and typos are reported" {
     // Only the single-word typo warns; the sentence is prose.
     try testing.expectEqual(@as(usize, 1), parsed.warnings.items.len);
     try testing.expect(std.mem.indexOf(u8, parsed.warnings.items[0], "'asynch'") != null);
+}
+
+fn warningsContain(parsed: Parsed, needle: []const u8) bool {
+    for (parsed.warnings.items) |w| if (std.mem.indexOf(u8, w, needle) != null) return true;
+    return false;
+}
+
+test "attributes are only recognised as plain lines in the header zone" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const src =
+        \\## > decorated
+        \\> Needs tools
+        \\
+        \\**Requires:** Node.js 18+, pnpm
+        \\
+        \\* Requires: eslint
+        \\
+        \\```sh
+        \\echo decorated
+        \\```
+        \\
+        \\## > late
+        \\> Prose comes first
+        \\
+        \\Some words about it.
+        \\Requires: other
+        \\
+        \\```sh
+        \\echo late
+        \\```
+        \\
+        \\## > plain
+        \\> Header zone keeps blockquotes and blanks
+        \\
+        \\> more description
+        \\
+        \\Requires: late
+        \\
+        \\```sh
+        \\echo plain
+        \\```
+        \\
+        \\## Inline
+        \\
+        \\Requires: plain
+        \\
+        \\```sh task
+        \\echo inline
+        \\```
+        \\
+    ;
+    const parsed = try parseForTest(arena, src);
+    const root = parsed.root;
+    try testing.expectEqual(@as(usize, 0), root.find("decorated").?.deps.requires.items.len);
+    try testing.expectEqual(@as(usize, 0), root.find("late").?.deps.requires.items.len);
+    try testing.expectEqual(@as(usize, 1), root.find("plain").?.deps.requires.items.len);
+    try testing.expectEqual(@as(usize, 1), root.find("inline").?.deps.requires.items.len);
+    try testing.expectEqual(@as(usize, 0), parsed.warnings.items.len);
+}
+
+test "blocks after prose that follow an earlier block are examples" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const src =
+        \\## > install
+        \\> Install things
+        \\
+        \\A description paragraph before the first block is fine.
+        \\
+        \\```sh
+        \\make install
+        \\```
+        \\
+        \\```sh
+        \\echo second block, no prose between: still a script
+        \\```
+        \\
+        \\For example, you can run it like this:
+        \\
+        \\```sh
+        \\kevin install --prefix /opt
+        \\```
+        \\
+        \\```text
+        \\output of the example
+        \\```
+        \\
+        \\Opt in explicitly:
+        \\
+        \\```sh task
+        \\echo final
+        \\```
+        \\
+    ;
+    const cmd = (try parseForTest(arena, src)).root.find("install").?;
+    try testing.expectEqual(@as(usize, 5), cmd.blocks.items.len);
+    try testing.expect(!cmd.blocks.items[0].example);
+    try testing.expect(!cmd.blocks.items[1].example);
+    try testing.expect(cmd.blocks.items[2].example);
+    try testing.expect(cmd.blocks.items[3].example);
+    try testing.expect(!cmd.blocks.items[4].example);
+}
+
+test "an unterminated fence warns with the line that opened it" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const src =
+        \\## > a
+        \\
+        \\```sh
+        \\echo one
+        \\
+        \\## > b
+        \\
+    ;
+    const parsed = try parseForTest(arena, src);
+    try testing.expect(warningsContain(parsed, "code block opened on line 3 is not closed; it runs to the end of the file"));
+    try testing.expect(parsed.root.find("b") == null);
+}
+
+test "argument and flag names are validated" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const src =
+        \\## > a (PATH) (ok) (ok) (1st) (my-arg) [env]
+        \\
+        \\**OPTIONS**
+        \\* ok
+        \\* KEVIN_X
+        \\    * type: string
+        \\* Verbose
+        \\* fine
+        \\    * flags: -f --fine
+        \\* fine
+        \\
+        \\```sh
+        \\true
+        \\```
+        \\
+        \\## > b (slow, needs [network]) after
+        \\
+        \\## > c (x) trailing words (y)
+        \\
+    ;
+    const parsed = try parseForTest(arena, src);
+    const a = parsed.root.find("a").?;
+    try testing.expectEqual(@as(usize, 2), a.args.items.len);
+    try testing.expectEqualStrings("ok", a.args.items[0].name);
+    try testing.expectEqualStrings("env", a.args.items[1].name);
+    try testing.expectEqual(@as(usize, 1), a.flags.items.len);
+    try testing.expectEqualStrings("fine", a.flags.items[0].name);
+    try testing.expectEqualStrings("--fine", a.flags.items[0].long.?);
+    try testing.expect(warningsContain(parsed, "'PATH' is reserved"));
+    try testing.expect(warningsContain(parsed, "invalid argument name '1st'"));
+    try testing.expect(warningsContain(parsed, "invalid argument name 'my-arg'"));
+    try testing.expect(warningsContain(parsed, "'ok' is already declared"));
+    try testing.expect(warningsContain(parsed, "'KEVIN_X' is reserved"));
+    try testing.expect(warningsContain(parsed, "'Verbose' is reserved"));
+    try testing.expect(warningsContain(parsed, "'fine' is already declared"));
+    // Trailing prose after the name is not parsed as arguments.
+    try testing.expectEqual(@as(usize, 0), parsed.root.find("b").?.args.items.len);
+    try testing.expectEqual(@as(usize, 1), parsed.root.find("c").?.args.items.len);
 }
 
 test "a fence-like line indented inside a block does not close it" {

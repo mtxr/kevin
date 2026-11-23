@@ -44,6 +44,9 @@ pub const CodeBlock = struct {
     code: []const u8,
     /// 1-based line of the opening fence.
     line: usize,
+    /// Documentation, not script: a block that follows prose after an earlier
+    /// block of a `>` command and does not carry the `task` keyword.
+    example: bool = false,
 };
 
 pub const RunDeps = enum { sync, async };

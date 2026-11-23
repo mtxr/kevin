@@ -193,6 +193,24 @@ the heading (`## Run Migrations` becomes `run-migrations`). Several task blocks
 under one heading form a single command. Inline tasks attach to the nearest
 `>` ancestor and never leak into earlier commands.
 
+**Example blocks.** Only the first blocks of a `>` command are its script. A
+code block that comes after a prose paragraph that itself follows an earlier
+block is documentation (an example, a sample output) and is not run, unless its
+info string contains the word `task`. A description paragraph before the first
+block, blank lines, blockquotes and attribute lines do not count. Once a block
+was skipped as an example, the blocks after it are examples too until one is
+tagged `task`. `kevin --explain <command>` lists the skipped blocks and says
+why.
+
+**Names.** Argument and flag names must match `[A-Za-z_][A-Za-z0-9_]*`. These
+are rejected with a warning (the declaration is skipped): `PATH`, `HOME`, `IFS`,
+`ENV`, `BASH_ENV`, `SHELL`, `PWD`, `OLDPWD`, `USER`, `LANG`, `TMPDIR`, names
+starting with `KEVIN`, and `verbose`/`help` (any case). Declaring the same name
+twice, as an argument and a flag or twice as either, keeps the first one. In
+headings and `task` info strings only `(...)` and `[...]` groups placed
+directly after the name are read, and only when each holds one valid name, so
+trailing prose such as `(slow, needs [network])` stays prose.
+
 Everything inside a fenced block is opaque: headings, `>` and `**OPTIONS**`
 inside it are ignored, and a fence only closes on a line with at least as many
 identical characters as the opening one (so ```` ```` ```` can wrap ``` ```).
@@ -229,10 +247,19 @@ Every command also accepts `-h/--help` (generated from the file) and
 `-v/--verbose`, which echoes each block before running it and sets
 `verbose=true`.
 
+A flag that is absent, or passed as `--flag=false`, is removed from the
+script's environment: a variable of the same name in the caller's environment
+(`port=99 kevin serve`) never leaks into the task. `--explain` shows such flags
+as unset.
+
 ## Dependencies
 
-A command can require other commands. Put `Requires:` lines under the
-heading, before the first code block; `RunDeps:`, `Run:` and `Jobs:` lines are
+A command can require other commands. Put `Requires:` lines in the header of
+the command: right after the heading and its `>` description, before any other
+paragraph, list or code block. They must be plain lines, with no `*`, `_`,
+backticks or list markers, so a documentation sentence such as
+`**Requires:** Node.js 18+` is never read as an attribute. An unknown name in a
+plain `Requires:` line is an error. `RunDeps:`, `Run:` and `Jobs:` lines are
 optional. They work on `>` commands and on inline tasks. A command with only
 `Requires:` and no code block is a runnable group.
 
@@ -343,6 +370,12 @@ reach every block as environment variables. See
 [`examples/runtimes.md`](examples/runtimes.md) for a command that mixes Node,
 bash and Python.
 
+Every block is a separate process, so a variable exported by one block is not
+visible to the next, in the same language or another one. Arguments and flags
+reach every block as environment variables. See
+[`examples/runtimes.md`](examples/runtimes.md) for a command that mixes Node,
+bash and Python.
+
 ## Compatibility with mask and xc
 
 kevin borrows mask's argument and flag syntax almost verbatim, but it is
@@ -407,10 +440,12 @@ prose.
 | `Run: once`                     | `Run: once`                                                     |
 | `Directory: x`, or none         | `cd "$KEVIN_DIR/x"`, or `cd "$KEVIN_DIR"` as xc runs in the file's directory |
 | `Env: K=V`                      | `export K='V'`                                                  |
-| unlabeled block / shebang       | `bash` with `set -e` (as xc runs it), or the shebang's language (shebang removed) |
+| unlabeled block / shebang       | `bash`, or the shebang's language (shebang removed)             |
+| shell blocks (`sh`, `bash`, `zsh`) | `set -e` first, as xc runs every shell script with it, tagged or not |
 | `$1`, `$@` in scripts           | not converted, reported (declare named args instead)            |
 
-Shell scripts migrated from xc `cd` into the file's directory, like xc does;
+Shell scripts migrated from xc `cd` into the file's directory (aborting if the
+`cd` fails), like xc does;
 other runtimes keep the current directory and are reported. org-mode files are
 not supported.
 

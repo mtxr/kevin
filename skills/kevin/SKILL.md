@@ -44,7 +44,8 @@ RunDeps: async
 ````
 
 - `(name)` is a required argument and `[name]` an optional one. They reach the
-  script as environment variables (`$target`), never as `$1` or `$@`.
+  script as environment variables (`$target`) and, in `sh`, `bash` and `zsh`
+  blocks, also as `$1..$n` (no variadic `$@`). Absent flags are unset.
 - Nesting follows the heading hierarchy: `### > server` under `## > setup` is
   `kevin setup server`.
 - Under a plain heading, a block is a command only with `task` in its info
@@ -55,7 +56,11 @@ RunDeps: async
   concurrently; `Run: once` runs a command once per invocation; `Jobs: N` caps
   concurrency; `-j N` caps concurrent scripts globally.
 - Several code blocks in one command run in order and stop at the first
-  failure. Blocks without a language or with data languages are ignored.
+  failure. Blocks without a language or with data languages are ignored. A
+  block after prose that follows an earlier block is an example and does not
+  run unless its info string has `task`.
+- Attribute lines (`Requires:`...) must be plain lines right after the heading
+  and description; reserved or duplicate argument/flag names are skipped.
 - Call a sibling task from a script with `$KEVIN other-task`.
 
 ## Migrating
