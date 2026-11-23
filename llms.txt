@@ -1,6 +1,6 @@
 # kevin
 
-> kevin is a task runner that turns Markdown files (README.md, tasks.md, build.md) into a command line interface: headings marked with `>` become commands and their code blocks become the scripts. It is a small, dependency-free alternative to make and just for project tasks, in the family of mask and xc, written in Zig. Status: early (0.x).
+> kevin is a task runner that turns Markdown files (README.md, tasks.md, build.md) into a command line interface: headings marked with `>` become commands and their code blocks become the scripts. It is a small, dependency-free alternative to make and just for project tasks, in the family of mask and xc, written in Zig. An optional `.kevinrc` in the current directory adds or excludes Markdown files (`docs/*.md`, `!draft.md`). Status: early (0.x).
 
 kevin gives each command positional arguments, typed flags (number, string, boolean, choices, required), dependencies (`Requires:`, sync or async, with a job limit), several runtimes (shell, Node/Bun, TypeScript, Python, Ruby, Lua, PHP, PowerShell) and a generated `--help`. `kevin --explain <command>` previews what would run without running it, `kevin --introspect` prints the command tree as JSON, and `kevin --from mask|xc` converts existing mask or xc files.
 

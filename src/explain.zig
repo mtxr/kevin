@@ -11,6 +11,10 @@ const Command = ast.Command;
 
 pub const Info = struct {
     sources: []const []const u8,
+    /// Why each source was read, aligned with `sources` (may be shorter).
+    reasons: []const []const u8 = &.{},
+    /// Files removed by `.kevinrc` excludes, already formatted.
+    excluded: []const []const u8 = &.{},
     warnings: []const []const u8,
     cmd: *const Command,
     /// Names from the root to `cmd`.
@@ -59,7 +63,12 @@ pub fn print(w: *Io.Writer, info: Info) Io.Writer.Error!void {
     const cmd = info.cmd;
 
     try w.writeAll("Sources\n");
-    for (info.sources, 1..) |s, i| try w.print("  {d}. {s}\n", .{ i, s });
+    for (info.sources, 1..) |s, i| {
+        try w.print("  {d}. {s}", .{ i, s });
+        if (i <= info.reasons.len) try w.print("  ({s})", .{info.reasons[i - 1]});
+        try w.writeByte('\n');
+    }
+    for (info.excluded) |e| try w.print("  excluded: {s}\n", .{e});
     for (info.warnings) |warn| try w.print("  warning: {s}\n", .{warn});
 
     try w.writeAll("\nCommand\n");
@@ -231,6 +240,28 @@ test "explain prints source, validation and per-block decisions" {
         .steps = &.{},
     });
     try testing.expect(std.mem.indexOf(u8, aw2.written(), "FAILED: missing required argument <target>") != null);
+}
+
+test "sources show why they were read and what was excluded" {
+    var buf: [1024]u8 = undefined;
+    var w = Io.Writer.fixed(&buf);
+    const root: Command = .{ .name = "" };
+    try print(&w, .{
+        .sources = &.{ "/x/README.md", "/x/ops.md" },
+        .reasons = &.{ "default", ".kevinrc line 2" },
+        .excluded = &.{"docs/draft.md (.kevinrc line 4)"},
+        .warnings = &.{},
+        .cmd = &root,
+        .path = &.{},
+        .invocation = .{},
+        .usage_error = null,
+        .injected = &.{},
+        .steps = &.{},
+    });
+    const out = w.buffered();
+    try testing.expect(std.mem.indexOf(u8, out, "1. /x/README.md  (default)") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "2. /x/ops.md  (.kevinrc line 2)") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "excluded: docs/draft.md (.kevinrc line 4)") != null);
 }
 
 test "explain shows example blocks as skipped and absent flags as unset" {

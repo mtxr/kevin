@@ -2,5 +2,5 @@
 input: env_vars__mask_set_to_the_correct_value.md
 run-in: elsewhere
 args: run
-stdout-contains: --file /
+stdout-contains: -f /
 stdout-contains: migrated.md

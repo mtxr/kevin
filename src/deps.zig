@@ -211,6 +211,8 @@ pub const Ctx = struct {
     io: Io,
     base_env: *const std.process.Environ.Map,
     exe: []const u8,
+    /// Markdown files of this run, in order; `$KEVIN` repeats them as `-f`.
+    files: []const []const u8,
     verbose: bool,
     jobs: usize,
     /// One permit per script allowed to run at the same time.
@@ -228,6 +230,7 @@ pub const max_depth: u32 = 32;
 pub fn injectedVars(
     arena: Allocator,
     exe: []const u8,
+    files: []const []const u8,
     cmd: *const Command,
     env: []const cli.EnvPair,
     verbose: bool,
@@ -235,7 +238,15 @@ pub fn injectedVars(
 ) Allocator.Error![]const cli.EnvPair {
     var out: std.ArrayList(cli.EnvPair) = .empty;
     try out.appendSlice(arena, env);
-    try out.append(arena, .{ .name = "KEVIN", .value = try std.fmt.allocPrint(arena, "{s} --file {s}", .{ exe, cmd.source_path }) });
+    // Every file of the run, so a child kevin sees the same command tree.
+    var kevin: std.ArrayList(u8) = .empty;
+    try kevin.appendSlice(arena, exe);
+    const list: []const []const u8 = if (files.len > 0) files else &.{cmd.source_path};
+    for (list) |f| {
+        try kevin.appendSlice(arena, " -f ");
+        try kevin.appendSlice(arena, f);
+    }
+    try out.append(arena, .{ .name = "KEVIN", .value = kevin.items });
     try out.append(arena, .{ .name = "KEVIN_DIR", .value = std.fs.path.dirname(cmd.source_path) orelse "." });
     try out.append(arena, .{ .name = "KEVIN_JOBS", .value = try std.fmt.allocPrint(arena, "{d}", .{jobs}) });
     try out.append(arena, .{ .name = "KEVIN_DEPTH", .value = try std.fmt.allocPrint(arena, "{d}", .{depth + 1}) });
@@ -268,7 +279,7 @@ fn executeOnce(ctx: *Ctx, node: *Node) u8 {
     ctx.slots.waitUncancelable(ctx.io);
     defer ctx.slots.post(ctx.io);
 
-    const vars = injectedVars(ctx.arena, ctx.exe, node.cmd, node.env, ctx.verbose, ctx.jobs) catch return 1;
+    const vars = injectedVars(ctx.arena, ctx.exe, ctx.files, node.cmd, node.env, ctx.verbose, ctx.jobs) catch return 1;
     var env = ctx.base_env.clone(ctx.arena) catch return 1;
     for (vars) |p| env.put(p.name, p.value) catch return 1;
     // Absent or false flags must not inherit a same-named variable from the caller.
@@ -468,9 +479,21 @@ test "injected variables carry the nesting depth" {
     const saved = depth;
     defer depth = saved;
     depth = 4;
-    const vars = try injectedVars(arena, "/bin/kevin", root.find("a").?, &.{}, false, 2);
+    const vars = try injectedVars(arena, "/bin/kevin", &.{}, root.find("a").?, &.{}, false, 2);
     for (vars) |v| {
         if (std.mem.eql(u8, v.name, "KEVIN_DEPTH")) return try testing.expectEqualStrings("5", v.value);
+    }
+    return error.TestUnexpectedResult;
+}
+
+test "KEVIN repeats every file of the run as -f" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const root = (try parser.parseSource(arena, "/t.md", "## > a\n\n```sh\ntrue\n```\n")).root;
+    const vars = try injectedVars(arena, "/bin/kevin", &.{ "/x/a.md", "/x/b.md" }, root.find("a").?, &.{}, false, 2);
+    for (vars) |v| {
+        if (std.mem.eql(u8, v.name, "KEVIN")) return try testing.expectEqualStrings("/bin/kevin -f /x/a.md -f /x/b.md", v.value);
     }
     return error.TestUnexpectedResult;
 }

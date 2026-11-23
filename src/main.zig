@@ -12,6 +12,7 @@ const proc = @import("proc.zig");
 const introspect = @import("introspect.zig");
 const complete = @import("complete.zig");
 const update = @import("update.zig");
+const kevinrc = @import("kevinrc.zig");
 const build_options = @import("build_options");
 
 test {
@@ -26,6 +27,7 @@ test {
     _ = introspect;
     _ = complete;
     _ = update;
+    _ = kevinrc;
 }
 
 const default_files = [_][]const u8{ "readme.md", "tasks.md", "build.md" };
@@ -57,6 +59,73 @@ fn discover(arena: std.mem.Allocator, io: Io) ![]const []const u8 {
     return out.items;
 }
 
+/// Disk access for `kevinrc.resolve`, relative to the current directory.
+const DiskFs = struct {
+    io: Io,
+
+    /// Names of the files (and symlinks) in `dir`; a missing directory is empty.
+    pub fn list(self: DiskFs, arena: std.mem.Allocator, dir: []const u8) ![]const []const u8 {
+        var d = Io.Dir.cwd().openDir(self.io, if (dir.len == 0) "." else dir, .{ .iterate = true }) catch return &.{};
+        defer d.close(self.io);
+        var out: std.ArrayList([]const u8) = .empty;
+        var it = d.iterate();
+        while (try it.next(self.io)) |entry| {
+            if (entry.kind != .file and entry.kind != .sym_link) continue;
+            try out.append(arena, try arena.dupe(u8, entry.name));
+        }
+        return out.items;
+    }
+
+    /// Real absolute path of a regular file (or a symlink to one).
+    pub fn real(self: DiskFs, arena: std.mem.Allocator, path: []const u8) ?[]const u8 {
+        const st = Io.Dir.cwd().statFile(self.io, path, .{}) catch return null;
+        if (st.kind != .file) return null;
+        const abs = Io.Dir.cwd().realPathFileAlloc(self.io, path, arena) catch return null;
+        return abs;
+    }
+};
+
+/// The files kevin reads when no `-f` is given: the defaults, adjusted by
+/// `.kevinrc` in the current directory (never in a parent).
+const Discovered = struct {
+    names: []const []const u8,
+    reasons: []const []const u8,
+    excluded: []const []const u8,
+    warnings: []const []const u8,
+};
+
+fn discoverFiles(arena: std.mem.Allocator, io: Io) !Discovered {
+    const defaults = try discover(arena, io);
+    const text = Io.Dir.cwd().readFileAlloc(io, kevinrc.file_name, arena, .limited(max_file_size)) catch |err| switch (err) {
+        error.FileNotFound => null,
+        else => return err,
+    };
+    var names: std.ArrayList([]const u8) = .empty;
+    var reasons: std.ArrayList([]const u8) = .empty;
+    var excluded: std.ArrayList([]const u8) = .empty;
+    var warnings: std.ArrayList([]const u8) = .empty;
+    if (text == null) {
+        for (defaults) |d| {
+            try names.append(arena, d);
+            try reasons.append(arena, "default");
+        }
+        return .{ .names = names.items, .reasons = reasons.items, .excluded = &.{}, .warnings = &.{} };
+    }
+    const parsed = try kevinrc.parse(arena, text.?);
+    try warnings.appendSlice(arena, parsed.warnings);
+    const res = try kevinrc.resolve(arena, parsed.rules, defaults, DiskFs{ .io = io });
+    try warnings.appendSlice(arena, res.warnings);
+    for (res.files) |f| {
+        try names.append(arena, f.path);
+        try reasons.append(arena, switch (f.origin) {
+            .default => "default",
+            .include => |line| try std.fmt.allocPrint(arena, ".kevinrc line {d}", .{line}),
+        });
+    }
+    for (res.excluded) |e| try excluded.append(arena, try std.fmt.allocPrint(arena, "{s} (.kevinrc line {d})", .{ e.path, e.line }));
+    return .{ .names = names.items, .reasons = reasons.items, .excluded = excluded.items, .warnings = warnings.items };
+}
+
 pub fn main(init: std.process.Init) !u8 {
     const io = init.io;
     // One arena owns the whole AST and every file buffer.
@@ -67,7 +136,7 @@ pub fn main(init: std.process.Init) !u8 {
     const argv = try init.minimal.args.toSlice(arena);
 
     // Global flags are only recognised before the command name.
-    var file_arg: ?[]const u8 = null;
+    var file_args: std.ArrayList([]const u8) = .empty;
     var from_arg: ?[]const u8 = null;
     var output_arg: ?[]const u8 = null;
     var explain_flag = false;
@@ -82,9 +151,9 @@ pub fn main(init: std.process.Init) !u8 {
         if (std.mem.eql(u8, a, "-f") or std.mem.eql(u8, a, "--file")) {
             i += 1;
             if (i >= argv.len) return fail("{s} requires a path", .{a});
-            file_arg = argv[i];
+            try file_args.append(arena, argv[i]);
         } else if (std.mem.startsWith(u8, a, "--file=")) {
-            file_arg = a["--file=".len..];
+            try file_args.append(arena, a["--file=".len..]);
         } else if (std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V")) {
             var buf: [64]u8 = undefined;
             var w = Io.File.stdout().writer(io, &buf);
@@ -137,20 +206,31 @@ pub fn main(init: std.process.Init) !u8 {
 
     if (from_arg) |from| {
         if (tokens.items.len > 0) return fail("--from does not take a command (got '{s}')", .{tokens.items[0]});
-        return runMigration(arena, io, from, file_arg, output_arg);
+        return runMigration(arena, io, from, if (file_args.items.len > 0) file_args.items[file_args.items.len - 1] else null, output_arg);
     }
     if (output_arg != null) return fail("--output is only valid together with --from", .{});
 
     var names: []const []const u8 = undefined;
-    if (file_arg) |f| {
-        names = try arena.dupe([]const u8, &.{f});
+    var reasons: []const []const u8 = &.{};
+    var excluded_files: []const []const u8 = &.{};
+    var warnings: std.ArrayList([]const u8) = .empty;
+    if (file_args.items.len > 0) {
+        // -f means exactly these files; .kevinrc is ignored.
+        names = file_args.items;
+        const rs = try arena.alloc([]const u8, names.len);
+        @memset(rs, "--file");
+        reasons = rs;
     } else {
-        names = try discover(arena, io);
+        const d = discoverFiles(arena, io) catch |err|
+            return fail("cannot read '{s}': {t}", .{ kevinrc.file_name, err });
+        names = d.names;
+        reasons = d.reasons;
+        excluded_files = d.excluded;
+        try warnings.appendSlice(arena, d.warnings);
     }
 
     const root = try arena.create(ast.Command);
     root.* = .{ .name = "" };
-    var warnings: std.ArrayList([]const u8) = .empty;
     var sources: std.ArrayList([]const u8) = .empty;
 
     for (names) |name| {
@@ -265,7 +345,7 @@ pub fn main(init: std.process.Init) !u8 {
     if (init.environ_map.get("KEVIN_DEPTH")) |d| deps.depth = std.fmt.parseInt(u32, d, 10) catch 0;
 
     const exe = try std.process.executablePathAlloc(io, arena);
-    const injected = try deps.injectedVars(arena, exe, resolved.cmd, inv.env, inv.verbose, jobs);
+    const injected = try deps.injectedVars(arena, exe, sources.items, resolved.cmd, inv.env, inv.verbose, jobs);
 
     if (explain_flag) {
         const steps: []const runner.Step = if (graph != null and !is_root and !no_code) blk: {
@@ -276,6 +356,8 @@ pub fn main(init: std.process.Init) !u8 {
         } else &.{};
         try explain.print(out, .{
             .sources = sources.items,
+            .reasons = reasons,
+            .excluded = excluded_files,
             .warnings = warnings.items,
             .cmd = resolved.cmd,
             .path = resolved.path,
@@ -323,6 +405,7 @@ pub fn main(init: std.process.Init) !u8 {
         .io = exec_io,
         .base_env = init.environ_map,
         .exe = exe,
+        .files = sources.items,
         .verbose = inv.verbose,
         .jobs = jobs,
         .slots = .{ .permits = jobs },

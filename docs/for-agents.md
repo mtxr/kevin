@@ -21,7 +21,19 @@ Markdown files read) and `commands`. Each command has `name`, `path`,
 
 If kevin reports `no README.md, tasks.md or build.md found`, the project does
 not use kevin in the current directory. Use `kevin --file <path>` to point at a
-specific Markdown file.
+specific Markdown file (repeat `-f` for several; `-f` ignores `.kevinrc`).
+
+A `.kevinrc` in the current directory can add or remove files on top of those
+three defaults: one entry per line, `#` comments, `!entry` to exclude, relative
+paths only, and `*` only in the last path segment (`docs/*.md`; no `**`, no
+`..`). `kevin --explain` shows which files were read and why, and `$KEVIN` in a
+task repeats the same file set as `-f` arguments.
+
+```text
+ops.md
+docs/*.md
+!docs/draft.md
+```
 
 ## Preview before running
 
