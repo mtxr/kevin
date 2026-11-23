@@ -80,50 +80,32 @@ coding agent? See [docs/for-agents.md](docs/for-agents.md).
 
 ## Install
 
-### From the releases page
-
-Every release publishes one archive per platform on
-[github.com/mtxr/kevin/releases](https://github.com/mtxr/kevin/releases),
-plus a `SHA256SUMS` file. Pick the one for your system:
-
-| Platform              | Asset                                   |
-|-----------------------|-----------------------------------------|
-| macOS, Apple silicon  | `kevin-<version>-aarch64-macos.tar.gz`  |
-| macOS, Intel          | `kevin-<version>-x86_64-macos.tar.gz`   |
-| Linux, x86_64         | `kevin-<version>-x86_64-linux.tar.gz`   |
-| Linux, arm64          | `kevin-<version>-aarch64-linux.tar.gz`  |
-| Windows, x86_64       | `kevin-<version>-x86_64-windows.zip`    |
-
-Each archive contains a single `kevin` binary (`kevin.exe` on Windows), the
-`LICENSE` and this README. On macOS and Linux:
+macOS and Linux:
 
 ```sh
-VERSION=v0.1.0              # see the releases page for the latest one
-TARGET=aarch64-macos        # x86_64-macos, x86_64-linux or aarch64-linux
-BASE="https://github.com/mtxr/kevin/releases/download/$VERSION"
-
-curl -fsSLO "$BASE/kevin-$VERSION-$TARGET.tar.gz"
-curl -fsSLO "$BASE/SHA256SUMS"
-grep "kevin-$VERSION-$TARGET.tar.gz" SHA256SUMS | shasum -a 256 -c -   # use sha256sum -c on Linux
-tar -xzf "kevin-$VERSION-$TARGET.tar.gz"
-install -m 0755 "kevin-$VERSION-$TARGET/kevin" ~/.local/bin/kevin      # any directory on your PATH
-kevin --version
+curl -fsSL https://raw.githubusercontent.com/mtxr/kevin/main/install.sh | sh
 ```
 
-On Windows (PowerShell), download the `.zip`, extract it and put `kevin.exe` in
-a directory on your `PATH`:
+It picks the archive for your system from the
+[latest release](https://github.com/mtxr/kevin/releases/latest), verifies its
+checksum and installs `kevin` into `~/.local/bin` (set `KEVIN_INSTALL_DIR` to
+change it, or `KEVIN_VERSION=v0.1.0` to pin a version).
 
-```powershell
-$Version = "v0.1.0"
-$Name = "kevin-$Version-x86_64-windows"
-Invoke-WebRequest "https://github.com/mtxr/kevin/releases/download/$Version/$Name.zip" -OutFile "$Name.zip"
-Expand-Archive "$Name.zip" -DestinationPath .
-```
+Windows: download `kevin-<version>-x86_64-windows.zip` from the
+[releases page](https://github.com/mtxr/kevin/releases/latest), extract it and
+put `kevin.exe` on your `PATH`. Every release also has a `SHA256SUMS` file and
+the other archives (`aarch64-macos`, `x86_64-macos`, `x86_64-linux`,
+`aarch64-linux`) if you prefer to download by hand.
 
-The binaries are not code-signed. If macOS refuses to open a binary you
-downloaded with a browser, run `xattr -d com.apple.quarantine kevin` once
-(downloading with `curl` as above does not need it). Package managers are not
-available yet.
+The binaries are not code-signed. If macOS refuses to open one downloaded with
+a browser, run `xattr -d com.apple.quarantine kevin` once (the installer does
+not need it). Package managers are not available yet.
+
+### Updating
+
+`kevin --check-update` tells you whether a newer release exists (it only asks
+GitHub, using `curl`; nothing is downloaded). To update, run the install command
+again.
 
 ### From source
 
@@ -211,6 +193,24 @@ the heading (`## Run Migrations` becomes `run-migrations`). Several task blocks
 under one heading form a single command. Inline tasks attach to the nearest
 `>` ancestor and never leak into earlier commands.
 
+**Example blocks.** Only the first blocks of a `>` command are its script. A
+code block that comes after a prose paragraph that itself follows an earlier
+block is documentation (an example, a sample output) and is not run, unless its
+info string contains the word `task`. A description paragraph before the first
+block, blank lines, blockquotes and attribute lines do not count. Once a block
+was skipped as an example, the blocks after it are examples too until one is
+tagged `task`. `kevin --explain <command>` lists the skipped blocks and says
+why.
+
+**Names.** Argument and flag names must match `[A-Za-z_][A-Za-z0-9_]*`. These
+are rejected with a warning (the declaration is skipped): `PATH`, `HOME`, `IFS`,
+`ENV`, `BASH_ENV`, `SHELL`, `PWD`, `OLDPWD`, `USER`, `LANG`, `TMPDIR`, names
+starting with `KEVIN`, and `verbose`/`help` (any case). Declaring the same name
+twice, as an argument and a flag or twice as either, keeps the first one. In
+headings and `task` info strings only `(...)` and `[...]` groups placed
+directly after the name are read, and only when each holds one valid name, so
+trailing prose such as `(slow, needs [network])` stays prose.
+
 Everything inside a fenced block is opaque: headings, `>` and `**OPTIONS**`
 inside it are ignored, and a fence only closes on a line with at least as many
 identical characters as the opening one (so ```` ```` ```` can wrap ``` ```).
@@ -247,10 +247,19 @@ Every command also accepts `-h/--help` (generated from the file) and
 `-v/--verbose`, which echoes each block before running it and sets
 `verbose=true`.
 
+A flag that is absent, or passed as `--flag=false`, is removed from the
+script's environment: a variable of the same name in the caller's environment
+(`port=99 kevin serve`) never leaks into the task. `--explain` shows such flags
+as unset.
+
 ## Dependencies
 
-A command can require other commands. Put `Requires:` lines under the
-heading, before the first code block; `RunDeps:`, `Run:` and `Jobs:` lines are
+A command can require other commands. Put `Requires:` lines in the header of
+the command: right after the heading and its `>` description, before any other
+paragraph, list or code block. They must be plain lines, with no `*`, `_`,
+backticks or list markers, so a documentation sentence such as
+`**Requires:** Node.js 18+` is never read as an attribute. An unknown name in a
+plain `Requires:` line is an error. `RunDeps:`, `Run:` and `Jobs:` lines are
 optional. They work on `>` commands and on inline tasks. A command with only
 `Requires:` and no code block is a runnable group.
 
@@ -387,6 +396,12 @@ POSIX-shell blocks (`sh`/`bash`/`zsh`/`fish`) and Windows-shell blocks
 Blocks without a language, or with data languages (`json`, `yaml`, `toml`,
 `text`, `md`), are ignored.
 
+Every block is a separate process, so a variable exported by one block is not
+visible to the next, in the same language or another one. Arguments and flags
+reach every block as environment variables. See
+[`examples/runtimes.md`](examples/runtimes.md) for a command that mixes Node,
+bash and Python.
+
 ## Compatibility with mask and xc
 
 kevin borrows mask's argument and flag syntax almost verbatim, but it is
@@ -451,10 +466,12 @@ prose.
 | `Run: once`                     | `Run: once`                                                     |
 | `Directory: x`, or none         | `cd "$KEVIN_DIR/x"`, or `cd "$KEVIN_DIR"` as xc runs in the file's directory |
 | `Env: K=V`                      | `export K='V'`                                                  |
-| unlabeled block / shebang       | `bash` with `set -e` (as xc runs it), or the shebang's language (shebang removed) |
+| unlabeled block / shebang       | `bash`, or the shebang's language (shebang removed)             |
+| shell blocks (`sh`, `bash`, `zsh`) | `set -e` first, as xc runs every shell script with it, tagged or not |
 | `$1`, `$@` in scripts           | not converted, reported (declare named args instead)            |
 
-Shell scripts migrated from xc `cd` into the file's directory, like xc does;
+Shell scripts migrated from xc `cd` into the file's directory (aborting if the
+`cd` fails), like xc does;
 other runtimes keep the current directory and are reported. org-mode files are
 not supported.
 

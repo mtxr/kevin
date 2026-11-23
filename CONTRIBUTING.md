@@ -65,10 +65,8 @@ Versioning below 1.0 (`bump-minor-pre-major`): `feat` and breaking changes
 patch. To force a version, add a `Release-As: x.y.z` footer to a commit body
 on `main`.
 
-The config currently has `"release-as": "0.1.0"` so the first release is
-v0.1.0. After that release is published, remove the `release-as` line from
-`release-please-config.json`, otherwise every later release PR would keep
-proposing 0.1.0.
+The first release (v0.1.0) was forced with `release-as`; that line is gone, so
+later versions follow the commit types (`feat` bumps the minor while below 1.0).
 
 ## Commit messages
 

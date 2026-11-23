@@ -16,7 +16,7 @@ kevin --introspect         # the whole command tree as JSON
 Markdown files read) and `commands`. Each command has `name`, `path`,
 `description`, `source` and `line` (where it is declared), `args`, `flags`
 (`name`, `short`, `long`, `type`, `choices`, `required`), `requires`,
-`run_deps`, `run_once`, `jobs`, `blocks` (`lang`, `line`, `code`) and nested
+`run_deps`, `run_once`, `jobs`, `blocks` (`lang`, `line`, `code`, `example`) and nested
 `subcommands`. Prefer it over scraping `--help`.
 
 If kevin reports `no README.md, tasks.md or build.md found`, the project does
@@ -44,7 +44,10 @@ kevin <command> [args...] [--flag value]
 - The exit code is the script's own, so failures propagate. Exit code 2 is a
   usage error, 126 a process that could not start, 127 a missing runtime.
 - Arguments and flags reach the script as environment variables named after
-  them (`$target`, `$port`), never as `$1` or `$@`.
+  them (`$target`, `$port`). Declared arguments also arrive as `$1..$n` in
+  `sh`, `bash` and `zsh` blocks (`$0` is `kevin`; trailing optional arguments
+  that were not given are left out). There are no variadic arguments. A flag
+  that is absent or false is unset, never inherited from the caller.
 - Blocks run from a private temp file (`sh <file>`), so stdin stays free for the
   script. SIGINT, SIGTERM and SIGHUP are forwarded to running scripts and kevin
   exits with 128 plus the signal; a second signal kills them. A task calling
@@ -88,6 +91,16 @@ RunDeps: async
 - Several code blocks under one command run in order and stop at the first
   failure. Blocks without a language, or in data languages (`json`, `yaml`,
   `md`), are ignored. Inside a fenced block everything is literal.
+- A block that follows a prose paragraph after an earlier block is an example
+  and does not run, unless its info string has `task` (` ```sh task `).
+  `--explain` shows it as skipped. Put sample commands and outputs after prose,
+  and real steps in consecutive blocks.
+- `Requires:`, `RunDeps:`, `Run:` and `Jobs:` are read only as plain lines
+  (no `*`, `_`, backticks, list markers) in the header, right after the heading
+  and its description. Elsewhere they are ordinary prose.
+- Argument and flag names are `[A-Za-z_][A-Za-z0-9_]*`; reserved names (`PATH`,
+  `HOME`, `IFS`, `ENV`, `SHELL`, `PWD`, `USER`, `LANG`, `TMPDIR`, `KEVIN*`,
+  `verbose`, `help`...) and duplicates are skipped with a warning.
 - Call sibling tasks from a script with `$KEVIN other-task`.
 - Convert an existing file: `kevin --from mask > tasks.md` or
   `kevin --from xc -f README.md -o tasks.md`.

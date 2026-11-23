@@ -497,15 +497,8 @@ fn convertXcTask(
         for (prose.items[desc_start..p]) |l| try out.print(arena, "> {s}\n", .{std.mem.trim(u8, l, " \t")});
     }
     try out.append(arena, '\n');
-    var wrote_rest = false;
-    for (prose.items[p..]) |l| {
-        if (!wrote_rest and std.mem.trim(u8, l, " \t").len == 0) continue;
-        wrote_rest = true;
-        try appendLine(arena, out, l);
-    }
-    if (wrote_rest and std.mem.trim(u8, prose.items[prose.items.len - 1], " \t").len != 0) try out.append(arena, '\n');
-
-    // Dependencies map onto kevin's own attributes.
+    // Dependencies map onto kevin's own attributes. They must come right after the
+    // description (kevin only reads attribute lines there), before any other prose.
     if (requires.items.len > 0) {
         try out.appendSlice(arena, "Requires: ");
         for (requires.items, 0..) |r, i| try out.print(arena, "{s}{s}", .{ if (i > 0) ", " else "", r });
@@ -514,6 +507,14 @@ fn convertXcTask(
     }
     if (run_once) try out.appendSlice(arena, "Run: once\n");
     if (requires.items.len > 0 or run_once) try out.append(arena, '\n');
+
+    var wrote_rest = false;
+    for (prose.items[p..]) |l| {
+        if (!wrote_rest and std.mem.trim(u8, l, " \t").len == 0) continue;
+        wrote_rest = true;
+        try appendLine(arena, out, l);
+    }
+    if (wrote_rest and std.mem.trim(u8, prose.items[prose.items.len - 1], " \t").len != 0) try out.append(arena, '\n');
 
     // The task script itself.
     var tail_start = task_end;
@@ -537,11 +538,7 @@ fn convertXcTask(
             code = code[1..];
         }
         // xc runs untagged blocks with bash, stopping at the first failing command.
-        var implicit_bash = false;
-        if (lang.len == 0) {
-            lang = "bash";
-            implicit_bash = true;
-        }
+        if (lang.len == 0) lang = "bash";
 
         const shell = isShellLang(lang);
         const has_setup = dir != null or envs.items.len > 0;
@@ -557,22 +554,23 @@ fn convertXcTask(
 
         try out.print(arena, "{s}{s}\n", .{ try fenceOf(arena, f), lang });
         if (shell) {
-            if (implicit_bash) try out.appendSlice(arena, "set -e\n");
+            // xc runs every shell script with `set -e`, tagged or not.
+            try out.appendSlice(arena, "set -e\n");
             // xc runs tasks in the Markdown file's directory unless `Directory:` says otherwise.
             if (dir) |d| {
                 const dd = std.mem.trim(u8, d, " \t");
                 if (!std.mem.eql(u8, dd, "$PWD")) {
                     const rel = if (std.mem.startsWith(u8, dd, "./")) dd[2..] else dd;
                     if (rel.len > 0 and (rel[0] == '/' or rel[0] == '~')) {
-                        try out.print(arena, "cd \"{s}\"\n", .{try shellDoubleEscape(arena, rel)});
+                        try out.print(arena, "cd \"{s}\" || exit 1\n", .{try shellDoubleEscape(arena, rel)});
                     } else {
-                        try out.print(arena, "cd \"$KEVIN_DIR/{s}\"\n", .{try shellDoubleEscape(arena, rel)});
+                        try out.print(arena, "cd \"$KEVIN_DIR/{s}\" || exit 1\n", .{try shellDoubleEscape(arena, rel)});
                     }
                 } else {
                     try note(arena, notes, "task '{s}': `Directory: $PWD` is already kevin's default", .{name});
                 }
             } else {
-                try out.appendSlice(arena, "cd \"$KEVIN_DIR\"\n");
+                try out.appendSlice(arena, "cd \"$KEVIN_DIR\" || exit 1\n");
             }
             for (envs.items) |e| {
                 var is_input = false;
@@ -714,7 +712,7 @@ test "xc: tasks, attributes, inputs, env and shebang" {
     try testing.expect(std.mem.indexOf(u8, o, "### > test\n> Run the tests.\n") != null);
     try testing.expect(std.mem.indexOf(u8, o, "### > deploy (TARGET) [NAME]\n> Deploy it.\n") != null);
     try testing.expect(std.mem.indexOf(u8, o, "Requires: test, lint\n") != null);
-    try testing.expect(std.mem.indexOf(u8, o, "cd \"$KEVIN_DIR/deployment\"\n") != null);
+    try testing.expect(std.mem.indexOf(u8, o, "cd \"$KEVIN_DIR/deployment\" || exit 1\n") != null);
     try testing.expect(std.mem.indexOf(u8, o, "export STAGE='prod'\n") != null);
     try testing.expect(std.mem.indexOf(u8, o, "export NAME=\"${NAME:-World}\"\n") != null);
     try testing.expect(std.mem.indexOf(u8, o, "```python\nprint(\"hi\")\n```") != null);
@@ -732,7 +730,47 @@ test "xc: tasks, attributes, inputs, env and shebang" {
     try testing.expectEqual(@as(usize, 2), deploy.deps.requires.items.len);
     try testing.expectEqualStrings("python", parsed.root.find("py").?.blocks.items[0].lang);
     try testing.expectEqualStrings("bash", parsed.root.find("test").?.blocks.items[0].lang);
-    try testing.expect(std.mem.indexOf(u8, o, "set -e\ncd \"$KEVIN_DIR\"\ngo test") != null);
+    try testing.expect(std.mem.indexOf(u8, o, "set -e\ncd \"$KEVIN_DIR\" || exit 1\ngo test") != null);
+}
+
+test "xc: tagged shell blocks get set -e and Requires stays in the header zone" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const src =
+        \\## Tasks
+        \\
+        \\### build
+        \\
+        \\```sh
+        \\make
+        \\```
+        \\
+        \\### ship
+        \\
+        \\Ship it.
+        \\
+        \\More details about shipping.
+        \\
+        \\Requires: build
+        \\Directory: out
+        \\
+        \\```zsh
+        \\echo shipped
+        \\```
+        \\
+    ;
+    const o = (try migrate(arena, .xc, src)).output;
+    try testing.expect(std.mem.indexOf(u8, o, "```sh\nset -e\ncd \"$KEVIN_DIR\" || exit 1\nmake\n") != null);
+    try testing.expect(std.mem.indexOf(u8, o, "```zsh\nset -e\ncd \"$KEVIN_DIR/out\" || exit 1\necho shipped\n") != null);
+
+    // The migrated file keeps working: Requires sits before the extra prose.
+    const parsed = try parser.parseSource(arena, "/x.md", o);
+    const ship = parsed.root.find("ship").?;
+    try testing.expectEqual(@as(usize, 1), ship.deps.requires.items.len);
+    try testing.expectEqualStrings("build", ship.deps.requires.items[0]);
+    try testing.expectEqual(@as(usize, 0), parsed.warnings.items.len);
 }
 
 test "xc: missing Tasks section and positional warning" {

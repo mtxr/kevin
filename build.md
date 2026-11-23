@@ -109,7 +109,37 @@ case "$msg" in *'no README.md, tasks.md or build.md found'*) ;; *) echo "smoke: 
 [ "$($bin -f examples/regressions.md positional a b)" = "count=2 first=[a] second=[b]" ] || { echo "smoke: positional parameters (two arguments)"; exit 1; }
 $bin -f examples/tasks.md --complete hel | grep -q "^hello" || { echo "smoke: completion of a command name"; exit 1; }
 $bin -f examples/tasks.md --complete "" | grep -q . || { echo "smoke: completion lists commands"; exit 1; }
+[ "$($bin -f examples/runtimes.md blocks | tail -1)" = "second block sees SHARED=[]" ] || { echo "smoke: blocks must not share variables"; exit 1; }
 for sh in zsh bash fish; do $bin --completion $sh | grep -q kevin || { echo "smoke: completion script for $sh"; exit 1; }; done
+
+# Absent or false flags are unset: a same-named variable of the caller never leaks in.
+[ "$(dry_run=true port=99 $bin -f examples/regressions.md flagged)" = "dry_run=[unset] port=[unset]" ] || { echo "smoke: absent flags leaked from the environment"; exit 1; }
+[ "$(dry_run=true $bin -f examples/regressions.md flagged --dry-run=false)" = "dry_run=[unset] port=[unset]" ] || { echo "smoke: a false flag leaked from the environment"; exit 1; }
+[ "$($bin -f examples/regressions.md flagged --dry-run -p 5)" = "dry_run=[true] port=[5]" ] || { echo "smoke: flags not passed"; exit 1; }
+case "$(port=3 $bin -f examples/regressions.md --explain flagged)" in *'env: port = (unset'*) ;; *) echo "smoke: explain does not show unset flags"; exit 1 ;; esac
+
+# Example blocks (a block after prose that follows an earlier block) do not run unless tagged `task`.
+[ "$($bin -f examples/regressions.md examples)" = "$(printf 'real\nopted-in')" ] || { echo "smoke: example block ran as a script"; exit 1; }
+case "$($bin -f examples/regressions.md --explain examples)" in *'skipped (example:'*'add `task`'*) ;; *) echo "smoke: explain does not show the skipped example"; exit 1 ;; esac
+
+# Attribute lines are only recognised as plain lines right after the heading; names are validated.
+fence='```'
+{
+  printf '## > tools\n> Documentation that mentions requirements\n\n**Requires:** Node.js 18+, pnpm\n\n* Requires: eslint\n\n'
+  printf '%ssh\necho tools ok\n%s\n\n' "$fence" "$fence"
+  printf '## > bad (PATH) (my-arg) (ok) (ok)\n\n%ssh\necho "ok=[$ok]"\n%s\n\n' "$fence" "$fence"
+  printf '## > open\n\n%ssh\necho before\n' "$fence"
+} > "$tmp/prose.md"
+[ "$($bin -f "$tmp/prose.md" tools 2>/dev/null)" = "tools ok" ] || { echo "smoke: decorated Requires text was parsed as an attribute"; exit 1; }
+msg=$($bin -f "$tmp/prose.md" bad x 2>&1)
+case "$msg" in *"'PATH' is reserved"*"invalid argument name 'my-arg'"*"'ok' is already declared"*"ok=[x]"*) ;; *) echo "smoke: argument names not validated: $msg"; exit 1 ;; esac
+msg=$($bin -f "$tmp/prose.md" open 2>&1)
+case "$msg" in *"code block opened on line"*"is not closed; it runs to the end of the file"*) ;; *) echo "smoke: unterminated fence not reported: $msg"; exit 1 ;; esac
+
+# xc migration: tagged shell blocks also get set -e, and cd aborts on failure.
+printf '## Tasks\n\n### t\n\n%ssh\necho tagged\n%s\n' "$fence" "$fence" > "$tmp/xc-tagged.md"
+$bin --from xc -f "$tmp/xc-tagged.md" 2>/dev/null | grep -q '^set -e$' || { echo "smoke: xc tagged block without set -e"; exit 1; }
+$bin --from xc -f "$tmp/xc-tagged.md" 2>/dev/null | grep -q 'KEVIN_DIR" || exit 1$' || { echo "smoke: xc cd does not abort on failure"; exit 1; }
 
 # Process handling: stdin, temp scripts, signals, fail-fast, --jobs and recursion.
 proc=examples/process.md
