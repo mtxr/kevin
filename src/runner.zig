@@ -55,6 +55,7 @@ fn familyToDrop(blocks: []const CodeBlock, os: std.Target.Os.Tag) ?Family {
     var has_posix = false;
     var has_win = false;
     for (blocks) |b| {
+        if (b.example) continue;
         const k = kindOf(b.lang) orelse continue;
         switch (familyOf(k)) {
             .posix_shell => has_posix = true,
@@ -72,6 +73,7 @@ pub fn selectBlocks(arena: Allocator, blocks: []const CodeBlock, os: std.Target.
     const drop = familyToDrop(blocks, os);
     var out: std.ArrayList(CodeBlock) = .empty;
     for (blocks) |b| {
+        if (b.example) continue;
         const k = kindOf(b.lang) orelse continue;
         if (drop != null and familyOf(k) == drop.?) continue;
         try out.append(arena, b);
@@ -174,6 +176,8 @@ pub const Step = struct {
     launch: ?Launch = null,
 };
 
+const example_reason = "example: it follows prose after an earlier block; add `task` to its info string to run it";
+
 /// Decides, for every block of `cmd`, what would happen, without running anything.
 pub fn planFor(
     arena: Allocator,
@@ -185,6 +189,10 @@ pub fn planFor(
     const drop = familyToDrop(cmd.blocks.items, os);
     var steps: std.ArrayList(Step) = .empty;
     for (cmd.blocks.items) |b| {
+        if (b.example) {
+            try steps.append(arena, .{ .block = b, .status = .skipped, .reason = example_reason });
+            continue;
+        }
         const kind = kindOf(b.lang) orelse {
             const reason = if (b.lang.len == 0)
                 "no language"

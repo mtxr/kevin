@@ -19,7 +19,7 @@ const FlagJson = struct {
     required: bool,
 };
 
-const BlockJson = struct { lang: []const u8, line: usize, code: []const u8 };
+const BlockJson = struct { lang: []const u8, line: usize, code: []const u8, example: bool };
 
 const CommandJson = struct {
     name: []const u8,
@@ -62,7 +62,7 @@ fn convert(arena: Allocator, cmd: *const Command, parent_path: []const []const u
     };
 
     const blocks = try arena.alloc(BlockJson, cmd.blocks.items.len);
-    for (cmd.blocks.items, blocks) |b, *o| o.* = .{ .lang = b.lang, .line = b.line, .code = b.code };
+    for (cmd.blocks.items, blocks) |b, *o| o.* = .{ .lang = b.lang, .line = b.line, .code = b.code, .example = b.example };
 
     const subs = try arena.alloc(CommandJson, cmd.children.items.len);
     for (cmd.children.items, subs) |c, *o| o.* = try convert(arena, c, path);
