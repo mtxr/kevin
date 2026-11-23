@@ -212,10 +212,36 @@ pub fn planFor(
             .block = b,
             .status = if (chosen != null) .run else .no_runtime,
             .tried = tried.items,
-            .launch = chosen,
+            .launch = if (chosen) |c| try withPositional(arena, c, cmd, env) else null,
         });
     }
     return steps.items;
+}
+
+fn envValue(env: *const std.process.Environ.Map, name: []const u8) []const u8 {
+    return env.get(name) orelse "";
+}
+
+/// Shell blocks also receive the declared arguments as `$1..$n` (and `$@`), the
+/// way xc passes them, on top of the named variables. `$0` is "kevin". Trailing
+/// optional arguments that were not given are left out, so `$#` is meaningful.
+fn withPositional(arena: Allocator, launch: Launch, cmd: *const Command, env: *const std.process.Environ.Map) Allocator.Error!Launch {
+    const shell = launch.argv.len == 3 and launch.stdin == null and std.mem.eql(u8, launch.argv[1], "-c") and
+        (std.mem.eql(u8, launch.argv[0], "sh") or std.mem.eql(u8, launch.argv[0], "bash") or std.mem.eql(u8, launch.argv[0], "zsh"));
+    if (!shell or cmd.args.items.len == 0) return launch;
+
+    var n = cmd.args.items.len;
+    while (n > 0) : (n -= 1) {
+        const a = cmd.args.items[n - 1];
+        if (a.required or envValue(env, a.name).len > 0) break;
+    }
+    if (n == 0) return launch;
+
+    const argv = try arena.alloc([]const u8, 4 + n);
+    @memcpy(argv[0..3], launch.argv);
+    argv[3] = "kevin";
+    for (cmd.args.items[0..n], 0..) |a, i| argv[4 + i] = envValue(env, a.name);
+    return .{ .argv = argv, .stdin = launch.stdin };
 }
 
 pub fn plan(
@@ -354,6 +380,27 @@ test "runtime candidates and fallbacks" {
     try testing.expectEqualStrings("bun", ts[0].argv[0]);
     try testing.expectEqualStrings("1", ts[0].stdin.?);
     try testing.expectEqualStrings("tsx", ts[1].argv[0]);
+}
+
+test "shell blocks receive declared arguments as positional parameters" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var cmd: Command = .{ .name = "greet" };
+    try cmd.args.append(arena, .{ .name = "first", .required = true });
+    try cmd.args.append(arena, .{ .name = "second", .required = false });
+    var env = std.process.Environ.Map.init(arena);
+    try env.put("first", "a");
+    try env.put("second", "");
+    const l = try withPositional(arena, .{ .argv = &.{ "bash", "-c", "echo $1" } }, &cmd, &env);
+    try testing.expectEqual(@as(usize, 5), l.argv.len); // bash -c code kevin a
+    try testing.expectEqualStrings("kevin", l.argv[3]);
+    try testing.expectEqualStrings("a", l.argv[4]);
+
+    try env.put("second", "b");
+    const l2 = try withPositional(arena, .{ .argv = &.{ "sh", "-c", "x" } }, &cmd, &env);
+    try testing.expectEqual(@as(usize, 6), l2.argv.len);
 }
 
 test "plan explains skipped blocks and missing runtimes" {

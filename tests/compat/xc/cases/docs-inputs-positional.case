@@ -2,4 +2,4 @@
 input: docs__inputs-positional.md
 args: greet Joe
 stdout-equals: Hello, Joe.
-xfail: kevin does not pass arguments as $1..$n and rejects undeclared arguments (the migration only reports it)
+xfail: kevin rejects undeclared arguments; only declared ones reach the script as $1..$n

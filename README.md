@@ -49,8 +49,8 @@ See the [compatibility table](#compatibility-with-mask-and-xc) for details.
 - You need a stable 1.0 interface today: kevin is 0.x.
 - You mainly target Windows: it builds there, but task execution has not been
   exercised on Windows yet.
-- Your scripts rely on `$1`/`$@` positional parameters (xc style): kevin passes
-  arguments as named environment variables.
+- Your scripts take an open-ended list of arguments (`$@` with no declared
+  arguments, variadic): kevin only passes arguments declared in the heading.
 
 ## Get started
 
@@ -303,7 +303,10 @@ kevin --explain hello World -t 2 -c red
 
 ## Environment
 
-Arguments and flags are injected into the script's environment, along with:
+Arguments and flags are injected into the script's environment. Declared
+arguments also arrive as `$1..$n` in `sh`, `bash` and `zsh` blocks (xc style;
+`$0` is `kevin`, and trailing optional arguments that were not given are left
+out). Also injected:
 
 | Variable      | Value                                                        |
 |---------------|--------------------------------------------------------------|
@@ -352,7 +355,7 @@ files need small edits (see below). A `?` means the behaviour was not verified a
 | Subcommand names prefixed with parent (`### services start`) | yes | no                       | no (use the hierarchy)                  |
 | Description                               | `>` blockquote         | paragraph under heading       | `>` blockquote                          |
 | Required `(arg)` / optional `[arg]`       | yes                    | `Inputs:` (+ `Env:` default)  | yes                                     |
-| Positional `$1` / `$@` in scripts         | no                     | yes                           | no (named env vars)                     |
+| Positional `$1` / `$@` in scripts         | no                     | yes                           | `$1..$n` for declared args in sh/bash/zsh; no variadic |
 | `**OPTIONS**` flags, `type`, `choices`, `required` | yes           | no                            | yes (same syntax)                       |
 | Implicit `-v/--verbose` and `verbose` env | yes                    | ?                             | yes                                     |
 | Helper variables                          | `$MASK`, `$MASKFILE_DIR` | ?                           | `$KEVIN`, `$KEVIN_DIR`                  |
@@ -420,8 +423,9 @@ kevin release   # cross-compile for linux, macos and windows into dist/
 
 ## Known limitations
 
-- Arguments reach scripts as named environment variables only; `$1`, `$@` and
-  variadic arguments are not supported.
+- Only declared arguments are passed (as named variables and, in `sh`, `bash`
+  and `zsh` blocks, as `$1..$n`); variadic arguments and `$@` without
+  declared arguments are not supported.
 - Dependencies that run `async` print their output interleaved.
 - Task execution on Windows has not been exercised yet (it only cross-compiles).
 - `--from xc` does not read inputs given only through environment variables,

@@ -105,6 +105,8 @@ case "$msg" in *'no README.md, tasks.md or build.md found'*) ;; *) echo "smoke: 
 # An absent optional argument is empty even when the caller's environment sets it.
 [ "$(name=Bob $bin -f examples/regressions.md optional-arg)" = "name=[]" ] || { echo "smoke: optional argument leaked from the environment"; exit 1; }
 [ "$(name=Bob $bin -f examples/regressions.md optional-arg claude)" = "name=[claude]" ] || { echo "smoke: optional argument not passed"; exit 1; }
+[ "$($bin -f examples/regressions.md positional a)" = "count=1 first=[a] second=[]" ] || { echo "smoke: positional parameters (one argument)"; exit 1; }
+[ "$($bin -f examples/regressions.md positional a b)" = "count=2 first=[a] second=[b]" ] || { echo "smoke: positional parameters (two arguments)"; exit 1; }
 
 # --introspect prints the command tree as JSON.
 intro=$($bin -f examples/tasks.md --introspect)
