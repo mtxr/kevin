@@ -519,13 +519,13 @@ fn runMigration(
     file_arg: ?[]const u8,
     output_arg: ?[]const u8,
 ) !u8 {
-    const source = migrate.Source.parse(from) orelse
+    const converter = migrate.find(from) orelse
         return fail("unknown source '{s}' for --from (expected 'mask' or 'xc')", .{from});
-    const path = file_arg orelse source.defaultFile();
+    const path = file_arg orelse converter.default_file;
     const text = Io.Dir.cwd().readFileAlloc(io, path, arena, .limited(max_file_size)) catch |err|
         return fail("cannot read '{s}': {t}", .{ path, err });
 
-    const result = migrate.migrate(arena, source, text) catch |err| switch (err) {
+    const result = converter.run(arena, text) catch |err| switch (err) {
         error.NoTasksSection => return fail("'{s}' has no 'Tasks' heading (xc needs one; see https://xcfile.dev)", .{path}),
         error.OutOfMemory => return err,
     };
