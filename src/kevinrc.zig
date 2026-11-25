@@ -6,12 +6,17 @@
 //! last segment contains `*` (matches any run of characters within that one
 //! segment). Nothing else is supported.
 //!
+//! `entry -> plugin` makes kevin read that (non-Markdown) file through a
+//! registered converter plugin, e.g. `package.json -> npm`. It cannot be
+//! combined with `!`.
+//!
 //! This module is pure: parsing and matching never touch the disk. Resolution
 //! asks a small file-system adapter (`list` and `real`, see `resolve`).
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
+const plugins = @import("plugins.zig");
 
 pub const file_name = ".kevinrc";
 
@@ -27,6 +32,8 @@ pub const Rule = struct {
     name: []const u8,
     /// The last segment contains `*`.
     glob: bool,
+    /// Registered plugin that converts the file(s), from `entry -> plugin`.
+    plugin: ?[]const u8 = null,
 };
 
 pub const Parsed = struct {
@@ -59,6 +66,21 @@ pub fn parse(arena: Allocator, text_in: []const u8) Allocator.Error!Parsed {
         if (entry.len == 0) {
             try warn(arena, &warnings, line_no, "an empty '!' entry is not supported", .{});
             continue;
+        }
+        var plugin: ?[]const u8 = null;
+        if (std.mem.indexOf(u8, entry, "->")) |arrow| {
+            const name = std.mem.trim(u8, entry[arrow + 2 ..], " \t");
+            const left = std.mem.trim(u8, entry[0..arrow], " \t");
+            if (exclude) {
+                try warn(arena, &warnings, line_no, "'{s}': '!' and '->' cannot be combined", .{entry});
+                continue;
+            }
+            if (left.len == 0 or !plugins.validName(name)) {
+                try warn(arena, &warnings, line_no, "'{s}': expected '<file> -> <plugin>' with a plugin name of lowercase letters, digits, '-' and '_'", .{entry});
+                continue;
+            }
+            entry = left;
+            plugin = try arena.dupe(u8, name);
         }
 
         const norm = try arena.dupe(u8, entry);
@@ -116,6 +138,7 @@ pub fn parse(arena: Allocator, text_in: []const u8) Allocator.Error!Parsed {
             .dir = dir,
             .name = name,
             .glob = std.mem.indexOfScalar(u8, name, '*') != null,
+            .plugin = plugin,
         });
     }
     return .{ .rules = rules.items, .warnings = warnings.items };
@@ -165,6 +188,8 @@ pub const Entry = struct {
     /// For `.global` entries: the path relative to the home directory, so a
     /// project-level exclude can name the file the way the global file did.
     rel: []const u8 = "",
+    /// Registered plugin that converts this file, if any.
+    plugin: ?[]const u8 = null,
 };
 
 pub const Excluded = struct {
@@ -247,10 +272,10 @@ pub fn resolveLayered(arena: Allocator, rules: []const Rule, seeds: []const Entr
                 if (!matchSegment(rule.name, n)) continue;
                 const path = try join(arena, rule.dir, n);
                 const real = fs.real(arena, path) orelse continue;
-                try addUnique(arena, &files, .{ .path = path, .real = real, .origin = .{ .include = rule.line } });
+                try addUnique(arena, &files, .{ .path = path, .real = real, .origin = .{ .include = rule.line }, .plugin = rule.plugin });
             }
         } else if (fs.real(arena, rule.path)) |real| {
-            try addUnique(arena, &files, .{ .path = rule.path, .real = real, .origin = .{ .include = rule.line } });
+            try addUnique(arena, &files, .{ .path = rule.path, .real = real, .origin = .{ .include = rule.line }, .plugin = rule.plugin });
         } else {
             try warn(arena, &warnings, rule.line, "'{s}' does not exist", .{rule.path});
         }
@@ -338,6 +363,25 @@ test "backslashes and ./ are normalised" {
     try testing.expectEqualStrings("x.md", p.rules[1].path);
     try testing.expectEqualStrings("", p.rules[1].dir);
     try testing.expect(!p.rules[1].glob);
+}
+
+test "'->' binds a file to a plugin" {
+    var st = std.heap.ArenaAllocator.init(testing.allocator);
+    defer st.deinit();
+    const arena = st.allocator();
+    const p = try parse(arena, "package.json -> npm\n*.todo->lines\n!x.json -> npm\nbad -> Bad Name\n -> npm\nplain.md\n");
+    try testing.expectEqual(@as(usize, 3), p.rules.len);
+    try testing.expectEqualStrings("package.json", p.rules[0].path);
+    try testing.expectEqualStrings("npm", p.rules[0].plugin.?);
+    try testing.expect(p.rules[1].glob);
+    try testing.expectEqualStrings("lines", p.rules[1].plugin.?);
+    try testing.expect(p.rules[2].plugin == null);
+    try testing.expectEqual(@as(usize, 3), p.warnings.len);
+    const res = try resolve(arena, p.rules, &.{}, FakeFs{ .files = &.{ "package.json", "a.todo", "plain.md" } });
+    try testing.expectEqualStrings("package.json a.todo plain.md", try paths(arena, res));
+    try testing.expectEqualStrings("npm", res.files[0].plugin.?);
+    try testing.expectEqualStrings("lines", res.files[1].plugin.?);
+    try testing.expect(res.files[2].plugin == null);
 }
 
 test "star matching" {

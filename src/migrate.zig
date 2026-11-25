@@ -26,6 +26,33 @@ pub const Source = enum {
     }
 };
 
+/// A converter turns the text of a foreign file into kevin Markdown. It is a
+/// pure function of its input: the built-ins below and, later, sandboxed
+/// plugins share this shape, so `--from` does not care where one comes from.
+pub const Converter = struct {
+    name: []const u8,
+    /// File read when `--file` is not given.
+    default_file: []const u8,
+    run: *const fn (arena: Allocator, raw: []const u8) Error!Result,
+};
+
+/// Looks a converter up by name (case-insensitive).
+pub fn find(name: []const u8) ?Converter {
+    const source = Source.parse(name) orelse return null;
+    return switch (source) {
+        .mask => .{ .name = "mask", .default_file = source.defaultFile(), .run = runMask },
+        .xc => .{ .name = "xc", .default_file = source.defaultFile(), .run = runXc },
+    };
+}
+
+fn runMask(arena: Allocator, raw: []const u8) Error!Result {
+    return migrate(arena, .mask, raw);
+}
+
+fn runXc(arena: Allocator, raw: []const u8) Error!Result {
+    return migrate(arena, .xc, raw);
+}
+
 pub const Result = struct {
     output: []const u8,
     /// Things that need a human look.
@@ -786,4 +813,14 @@ test "xc: missing Tasks section and positional warning" {
         if (std.mem.indexOf(u8, n, "positional") != null) found = true;
     }
     try testing.expect(found);
+}
+
+test "find resolves built-in converters by name" {
+    try testing.expect(find("nope") == null);
+    const c = find("MASK") orelse return error.TestUnexpectedResult;
+    try testing.expectEqualStrings("maskfile.md", c.default_file);
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const res = try c.run(arena_state.allocator(), "# t\n\n## hi\n\n~~~sh\necho hi\n~~~\n");
+    try testing.expect(res.output.len > 0);
 }

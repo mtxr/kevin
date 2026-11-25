@@ -335,8 +335,11 @@ pub fn printRootHelp(arena: Allocator, w: *Io.Writer, root: *const Command, sour
     try w.writeAll("Options:\n");
     try printRows(w, &.{
         .{ .left = "-f, --file <PATH>", .right = "Use a specific Markdown file" },
-        .{ .left = "    --from <mask|xc>", .right = "Convert a mask/xc file to kevin syntax (stdout, or -o)" },
+        .{ .left = "    --from <mask|xc|PLUGIN.wasm>", .right = "Convert a foreign file to kevin syntax (stdout, or -o)" },
         .{ .left = "-o, --output <PATH>", .right = "With --from: write the result to a new file" },
+        .{ .left = "    --plugin-add <FILE.wasm>", .right = "Register a converter plugin on this machine (records its sha256)" },
+        .{ .left = "    --plugin-list", .right = "List registered plugins" },
+        .{ .left = "    --plugin-remove <NAME>", .right = "Unregister a plugin" },
         .{ .left = "-j, --jobs <N>", .right = "Max scripts running at once (default: CPU count, or $KEVIN_JOBS)" },
         .{ .left = "    --completion <shell>", .right = "Print a completion script (zsh, bash or fish): eval \"$(kevin --completion zsh)\"" },
         .{ .left = "    --check-update", .right = "Check whether a newer release exists (downloads nothing)" },

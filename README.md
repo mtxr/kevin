@@ -207,7 +207,12 @@ Syntax, one entry per line (UTF-8, CRLF accepted, BOM ignored):
   names starting with `.` unless the pattern segment starts with `.` too;
 - not supported, with a warning and the entry skipped: `**`, `*` in a
   directory segment, absolute paths and any `..` segment (entries must stay
-  inside the current directory). There is no `?`, `[...]` or escaping.
+  inside the current directory). There is no `?`, `[...]` or escaping;
+- `entry -> plugin` (`package.json -> npm`) binds a file that is not Markdown
+  to a registered [converter plugin](PLUGINS.md) (or `mask` / `xc`). kevin
+  runs the plugin on the file every time, in memory, and merges the result
+  with the other files; nothing is written to disk. A plugin that fails or
+  produces no commands is an error. It cannot be combined with `!`.
 
 Resolution: the set starts with the default files (`README.md`, `tasks.md`,
 `build.md`, when present). Entries then apply top to bottom. An include appends

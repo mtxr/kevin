@@ -59,9 +59,9 @@ const fish_script =
     \\
 ;
 
-const global_flags = [_][]const u8{ "--file", "--from", "--output", "--jobs", "--explain", "--introspect", "--completion", "--version", "--help" };
+const global_flags = [_][]const u8{ "--file", "--from", "--output", "--jobs", "--explain", "--introspect", "--completion", "--plugin-add", "--plugin-list", "--plugin-remove", "--version", "--help" };
 /// Global flags that consume the next word.
-const global_with_value = [_][]const u8{ "-f", "--file", "-o", "--output", "-j", "--jobs", "--from", "--completion" };
+const global_with_value = [_][]const u8{ "-f", "--file", "-o", "--output", "-j", "--jobs", "--from", "--completion", "--plugin-add", "--plugin-remove" };
 
 fn isGlobalWithValue(t: []const u8) bool {
     for (global_with_value) |g| if (std.mem.eql(u8, g, t)) return true;
@@ -85,6 +85,12 @@ fn put(out: *Io.Writer, prefix: []const u8, name: []const u8, desc: []const u8) 
 pub fn candidates(arena: Allocator, out: *Io.Writer, root: *const ast.Command, words: []const []const u8) (Allocator.Error || Io.Writer.Error)!void {
     const cur: []const u8 = if (words.len > 0) words[words.len - 1] else "";
     const prior = if (words.len > 0) words[0 .. words.len - 1] else words;
+
+    if (prior.len > 0 and std.mem.eql(u8, prior[prior.len - 1], "--from")) {
+        try put(out, cur, "mask", "Convert a maskfile.md");
+        try put(out, cur, "xc", "Convert an xc README");
+        return;
+    }
 
     // Drop global flags (and their values) so they do not hide the command.
     var tokens: std.ArrayList([]const u8) = .empty;
@@ -190,4 +196,12 @@ test "completes commands, subcommands, flags and choices" {
     // global flags and their values do not hide the command
     const skipped = try run(arena, root, &.{ "-f", "x.md", "serve", "" });
     try testing.expectEqualStrings("web\n", skipped);
+}
+
+test "--from offers the built-in converters" {
+    var st = std.heap.ArenaAllocator.init(testing.allocator);
+    defer st.deinit();
+    const arena = st.allocator();
+    const parsed = try parser.parseSource(arena, "x.md", "# T\n");
+    try testing.expectEqualStrings("mask\tConvert a maskfile.md\n", try run(arena, parsed.root, &.{ "--from", "m" }));
 }
