@@ -220,6 +220,29 @@ usual. `kevin --explain` lists every file with the reason it was read
 (`default`, `.kevinrc line N`) and the files that were excluded, and tab
 completion uses the same set.
 
+#### Global `.kevinrc`
+
+A `.kevinrc` in your home directory (`~/.kevinrc`) applies to every project,
+the way git has a global config. `$KEVIN_GLOBAL_RC` overrides the location;
+set it to an empty string, or to a path that does not exist, to disable the
+global file. The syntax is exactly the one above, with these differences:
+
+- relative entries resolve against the home directory, not the current one.
+  The same safety rules apply: no absolute paths and no `..`. Symlinks are
+  followed, as in the project file;
+- layering: the global file is resolved first (it has no default files of its
+  own), then the project's default files, then the project `.kevinrc` rules.
+  The final order is global files, defaults, project includes. Later files
+  override earlier ones for the same command, so a project always wins over
+  the global file. Duplicates (same real path) are read once;
+- a project `!entry` can exclude a global file, by its home-relative name
+  (`!notes.md`, `!docs/*.md`) or by naming the same real file;
+- a project without a `.kevinrc` still uses the default discovery, with the
+  global files added in front. Without a global file nothing changes;
+- `-f` ignores the global file too;
+- warnings from it read ``global `.kevinrc` (<path>) line N: ...`` and
+  `--explain` shows `global .kevinrc line N` as the reason.
+
 ## Declaring commands
 
 **Marked headings.** Any heading level (`#` to `######`) followed by `>`

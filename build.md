@@ -213,6 +213,8 @@ case "$exp" in *'name (required) = World'*'argv:    bash <temp file>'*) ;; *) ec
 $bin -f examples/tasks.md --explain hello World -t abc >/dev/null 2>&1 && { echo "smoke: explain accepted bad input"; exit 1; }
 case "$($bin --version)" in "kevin "*) ;; *) echo "smoke: unexpected version output"; exit 1 ;; esac
 
+# Never read the developer's real ~/.kevinrc; the global-rc checks below set their own.
+export KEVIN_GLOBAL_RC=
 # .kevinrc: globs, direct paths, excludes, $KEVIN over the whole set, repeated -f.
 rcbin=$PWD/$bin
 rc() { (cd examples/rc && "$rcbin" "$@"); }
@@ -247,6 +249,31 @@ set +e
 set -e
 msg=$(cd "$tmp/rcmissing" && "$rcbin" from-readme 2>&1)
 case "$msg" in *"\`.kevinrc\` line 8: 'nope.md' does not exist"*) ;; *) echo "smoke: no warning for a missing .kevinrc entry: $msg"; exit 1 ;; esac
+
+# Global .kevinrc: relative to the home directory, applied before the project files.
+mkdir -p "$tmp/ghome/docs" "$tmp/gproj"
+printf '# global\nops.md\ndocs/*.md\n/etc/x.md\nmissing.md\n' > "$tmp/ghome/.kevinrc"
+cp examples/rc/ops.md "$tmp/ghome/ops.md"
+printf '# Global\n\n## > from-gdoc\n\n```sh\necho gdoc\n```\n' > "$tmp/ghome/docs/g.md"
+cp examples/rc/README.md "$tmp/gproj/"
+g() { (cd "$tmp/gproj" && HOME="$tmp/ghome" KEVIN_GLOBAL_RC="$tmp/ghome/.kevinrc" "$rcbin" "$@"); }
+[ "$(g from-ops)" = "ops" ] && [ "$(g from-gdoc)" = "gdoc" ] && [ "$(g from-readme)" = "readme" ] || { echo "smoke: global .kevinrc not applied"; exit 1; }
+msg=$(g from-readme 2>&1)
+case "$msg" in *"global \`.kevinrc\` ($tmp/ghome/.kevinrc) line 4: '/etc/x.md'"*"line 5: 'missing.md' does not exist"*) ;; *) echo "smoke: global warnings do not name the file: $msg"; exit 1 ;; esac
+exp=$(g --explain from-ops)
+case "$exp" in *"(global .kevinrc line 2)"*) ;; *) echo "smoke: explain does not show the global origin: $exp"; exit 1 ;; esac
+# A project .kevinrc can exclude a global file by its home-relative name.
+printf '!ops.md\n' > "$tmp/gproj/.kevinrc"
+set +e
+g from-ops >/dev/null 2>&1
+[ "$?" = "2" ] || { echo "smoke: project exclude did not drop a global file"; exit 1; }
+set -e
+[ "$(g from-gdoc)" = "gdoc" ] || { echo "smoke: project exclude dropped too much"; exit 1; }
+# An empty override disables the global file.
+set +e
+(cd "$tmp/gproj" && HOME="$tmp/ghome" KEVIN_GLOBAL_RC= "$rcbin" from-gdoc >/dev/null 2>&1)
+[ "$?" = "2" ] || { echo "smoke: empty KEVIN_GLOBAL_RC did not disable the global file"; exit 1; }
+set -e
 
 echo "smoke: ok"
 ```

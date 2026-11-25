@@ -94,32 +94,105 @@ const Discovered = struct {
     warnings: []const []const u8,
 };
 
-fn discoverFiles(arena: std.mem.Allocator, io: Io) !Discovered {
+/// Disk access for the global `.kevinrc`: entries are relative to `root` (the home directory).
+const HomeFs = struct {
+    io: Io,
+    root: []const u8,
+
+    fn abs(self: HomeFs, arena: std.mem.Allocator, path: []const u8) ![]const u8 {
+        return std.fmt.allocPrint(arena, "{s}/{s}", .{ std.mem.trimEnd(u8, self.root, "/"), path });
+    }
+
+    pub fn list(self: HomeFs, arena: std.mem.Allocator, dir: []const u8) ![]const []const u8 {
+        return (DiskFs{ .io = self.io }).list(arena, if (dir.len == 0) self.root else try self.abs(arena, dir));
+    }
+
+    pub fn real(self: HomeFs, arena: std.mem.Allocator, path: []const u8) ?[]const u8 {
+        const p = self.abs(arena, path) catch return null;
+        return (DiskFs{ .io = self.io }).real(arena, p);
+    }
+};
+
+/// Global `.kevinrc`: `$KEVIN_GLOBAL_RC` if set (empty disables it), else
+/// `~/.kevinrc`. Entries resolve against the home directory.
+const GlobalLayer = struct {
+    seeds: []const kevinrc.Entry = &.{},
+    warnings: []const []const u8 = &.{},
+};
+
+fn loadGlobal(arena: std.mem.Allocator, io: Io, environ: *const std.process.Environ.Map) !GlobalLayer {
+    const home: ?[]const u8 = environ.get("HOME") orelse environ.get("USERPROFILE");
+    var rc_path: []const u8 = undefined;
+    if (environ.get(kevinrc.global_env)) |p| {
+        if (p.len == 0) return .{};
+        rc_path = p;
+    } else {
+        const h = home orelse return .{};
+        rc_path = try std.fmt.allocPrint(arena, "{s}/{s}", .{ std.mem.trimEnd(u8, h, "/"), kevinrc.file_name });
+    }
+    const text = Io.Dir.cwd().readFileAlloc(io, rc_path, arena, .limited(max_file_size)) catch |err| switch (err) {
+        error.FileNotFound => return .{},
+        else => return .{ .warnings = try arena.dupe([]const u8, &.{try std.fmt.allocPrint(arena, "cannot read global `.kevinrc` ({s}): {t}", .{ rc_path, err })}) },
+    };
+    // When the project directory is the home directory the file is the project one.
+    if (Io.Dir.cwd().realPathFileAlloc(io, rc_path, arena)) |a| {
+        if (Io.Dir.cwd().realPathFileAlloc(io, kevinrc.file_name, arena)) |b| {
+            if (std.mem.eql(u8, a, b)) return .{};
+        } else |_| {}
+    } else |_| {}
+    const root = home orelse (std.fs.path.dirname(rc_path) orelse ".");
+    const fs = HomeFs{ .io = io, .root = root };
+    var warnings: std.ArrayList([]const u8) = .empty;
+    const parsed = try kevinrc.parse(arena, text);
+    const res = try kevinrc.resolve(arena, parsed.rules, &.{}, fs);
+    for (parsed.warnings) |w| try warnings.append(arena, try kevinrc.relabelGlobal(arena, w, rc_path));
+    for (res.warnings) |w| try warnings.append(arena, try kevinrc.relabelGlobal(arena, w, rc_path));
+    var seeds: std.ArrayList(kevinrc.Entry) = .empty;
+    for (res.files) |f| try seeds.append(arena, .{
+        .path = try fs.abs(arena, f.path),
+        .real = f.real,
+        .origin = .{ .global = switch (f.origin) {
+            .include, .global => |l| l,
+            .default => 0,
+        } },
+        .rel = f.path,
+    });
+    return .{ .seeds = seeds.items, .warnings = warnings.items };
+}
+
+fn discoverFiles(arena: std.mem.Allocator, io: Io, environ: *const std.process.Environ.Map) !Discovered {
     const defaults = try discover(arena, io);
     const text = Io.Dir.cwd().readFileAlloc(io, kevinrc.file_name, arena, .limited(max_file_size)) catch |err| switch (err) {
         error.FileNotFound => null,
         else => return err,
     };
+    const global = try loadGlobal(arena, io, environ);
     var names: std.ArrayList([]const u8) = .empty;
     var reasons: std.ArrayList([]const u8) = .empty;
     var excluded: std.ArrayList([]const u8) = .empty;
     var warnings: std.ArrayList([]const u8) = .empty;
-    if (text == null) {
+    try warnings.appendSlice(arena, global.warnings);
+    if (text == null and global.seeds.len == 0) {
         for (defaults) |d| {
             try names.append(arena, d);
             try reasons.append(arena, "default");
         }
-        return .{ .names = names.items, .reasons = reasons.items, .excluded = &.{}, .warnings = &.{} };
+        return .{ .names = names.items, .reasons = reasons.items, .excluded = &.{}, .warnings = warnings.items };
     }
-    const parsed = try kevinrc.parse(arena, text.?);
-    try warnings.appendSlice(arena, parsed.warnings);
-    const res = try kevinrc.resolve(arena, parsed.rules, defaults, DiskFs{ .io = io });
+    var rules: []const kevinrc.Rule = &.{};
+    if (text) |t| {
+        const parsed = try kevinrc.parse(arena, t);
+        try warnings.appendSlice(arena, parsed.warnings);
+        rules = parsed.rules;
+    }
+    const res = try kevinrc.resolveLayered(arena, rules, global.seeds, defaults, DiskFs{ .io = io });
     try warnings.appendSlice(arena, res.warnings);
     for (res.files) |f| {
         try names.append(arena, f.path);
         try reasons.append(arena, switch (f.origin) {
             .default => "default",
             .include => |line| try std.fmt.allocPrint(arena, ".kevinrc line {d}", .{line}),
+            .global => |line| try std.fmt.allocPrint(arena, "global .kevinrc line {d}", .{line}),
         });
     }
     for (res.excluded) |e| try excluded.append(arena, try std.fmt.allocPrint(arena, "{s} (.kevinrc line {d})", .{ e.path, e.line }));
@@ -221,7 +294,7 @@ pub fn main(init: std.process.Init) !u8 {
         @memset(rs, "--file");
         reasons = rs;
     } else {
-        const d = discoverFiles(arena, io) catch |err|
+        const d = discoverFiles(arena, io, init.environ_map) catch |err|
             return fail("cannot read '{s}': {t}", .{ kevinrc.file_name, err });
         names = d.names;
         reasons = d.reasons;

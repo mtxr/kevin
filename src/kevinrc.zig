@@ -152,6 +152,8 @@ pub const Origin = union(enum) {
     default,
     /// `.kevinrc` line number of the include.
     include: usize,
+    /// Line number of the include in the global `.kevinrc`.
+    global: usize,
 };
 
 pub const Entry = struct {
@@ -160,6 +162,9 @@ pub const Entry = struct {
     /// Real absolute path (identity of the file).
     real: []const u8,
     origin: Origin,
+    /// For `.global` entries: the path relative to the home directory, so a
+    /// project-level exclude can name the file the way the global file did.
+    rel: []const u8 = "",
 };
 
 pub const Excluded = struct {
@@ -183,7 +188,16 @@ fn join(arena: Allocator, dir: []const u8, name: []const u8) Allocator.Error![]c
     return std.fmt.allocPrint(arena, "{s}/{s}", .{ dir, name });
 }
 
+fn relMatches(rel: []const u8, rule: Rule) bool {
+    const slash = std.mem.lastIndexOfScalar(u8, rel, '/');
+    const edir = if (slash) |s| rel[0..s] else "";
+    const ename = if (slash) |s| rel[s + 1 ..] else rel;
+    if (rule.glob) return std.mem.eql(u8, edir, rule.dir) and matchSegment(rule.name, ename);
+    return std.mem.eql(u8, rel, rule.path);
+}
+
 fn entryMatches(arena: Allocator, e: Entry, rule: Rule, fs: anytype) bool {
+    if (e.origin == .global and relMatches(e.rel, rule)) return true;
     const slash = std.mem.lastIndexOfScalar(u8, e.path, '/');
     const edir = if (slash) |s| e.path[0..s] else "";
     const ename = if (slash) |s| e.path[s + 1 ..] else e.path;
@@ -202,10 +216,17 @@ fn entryMatches(arena: Allocator, e: Entry, rule: Rule, fs: anytype) bool {
 /// `real(arena, path) ?[]const u8` (absolute real path of a regular file or
 /// symlink to one, null otherwise).
 pub fn resolve(arena: Allocator, rules: []const Rule, defaults: []const []const u8, fs: anytype) !Result {
+    return resolveLayered(arena, rules, &.{}, defaults, fs);
+}
+
+/// Like `resolve`, but the set starts with `seeds` (already resolved entries,
+/// e.g. from the global `.kevinrc`), then the defaults, then the rules.
+pub fn resolveLayered(arena: Allocator, rules: []const Rule, seeds: []const Entry, defaults: []const []const u8, fs: anytype) !Result {
     var files: std.ArrayList(Entry) = .empty;
     var excluded: std.ArrayList(Excluded) = .empty;
     var warnings: std.ArrayList([]const u8) = .empty;
 
+    for (seeds) |e| try addUnique(arena, &files, e);
     for (defaults) |d| {
         const real = fs.real(arena, d) orelse continue;
         try addUnique(arena, &files, .{ .path = d, .real = real, .origin = .default });
@@ -235,6 +256,19 @@ pub fn resolve(arena: Allocator, rules: []const Rule, defaults: []const []const 
         }
     }
     return .{ .files = files.items, .excluded = excluded.items, .warnings = warnings.items };
+}
+
+/// Environment variable that overrides the global `.kevinrc` location. Set
+/// to an empty string (or a missing file) to disable the global file.
+pub const global_env = "KEVIN_GLOBAL_RC";
+
+/// Rewrites a warning produced for the global file so it names that file
+/// ("global `.kevinrc` (<path>) line N: ..."), and says "home directory".
+pub fn relabelGlobal(arena: Allocator, w: []const u8, path: []const u8) Allocator.Error![]const u8 {
+    const prefix = "`.kevinrc` line ";
+    if (!std.mem.startsWith(u8, w, prefix)) return w;
+    const body = try std.mem.replaceOwned(u8, arena, w[prefix.len..], "the current directory", "the home directory");
+    return std.fmt.allocPrint(arena, "global `.kevinrc` ({s}) line {s}", .{ path, body });
 }
 
 fn addUnique(arena: Allocator, files: *std.ArrayList(Entry), e: Entry) Allocator.Error!void {
@@ -405,4 +439,32 @@ test "a missing direct path warns, a glob without matches is silent" {
     try testing.expectEqual(@as(usize, 0), res.files.len);
     try testing.expectEqual(@as(usize, 1), res.warnings.len);
     try testing.expectEqualStrings("`.kevinrc` line 2: 'nope.md' does not exist", res.warnings[0]);
+}
+
+test "global seeds come first, project excludes can drop them by home-relative name" {
+    var st = std.heap.ArenaAllocator.init(testing.allocator);
+    defer st.deinit();
+    const arena = st.allocator();
+    const seeds = [_]Entry{
+        .{ .path = "/home/u/notes.md", .real = "/home/u/notes.md", .origin = .{ .global = 1 }, .rel = "notes.md" },
+        .{ .path = "/home/u/docs/a.md", .real = "/home/u/docs/a.md", .origin = .{ .global = 2 }, .rel = "docs/a.md" },
+    };
+    const parsed = try parse(arena, "extra.md\n");
+    const fs = FakeFs{ .files = &.{ "README.md", "extra.md" } };
+    var res = try resolveLayered(arena, parsed.rules, &seeds, &.{"README.md"}, fs);
+    try testing.expectEqualStrings("/home/u/notes.md /home/u/docs/a.md README.md extra.md", try paths(arena, res));
+    const p2 = try parse(arena, "!notes.md\n!docs/*.md\n");
+    res = try resolveLayered(arena, p2.rules, &seeds, &.{"README.md"}, fs);
+    try testing.expectEqualStrings("README.md", try paths(arena, res));
+    try testing.expectEqual(@as(usize, 2), res.excluded.len);
+}
+
+test "global warnings name the global file" {
+    var st = std.heap.ArenaAllocator.init(testing.allocator);
+    defer st.deinit();
+    const arena = st.allocator();
+    const p = try parse(arena, "/etc/x.md\n");
+    const w = try relabelGlobal(arena, p.warnings[0], "/home/u/.kevinrc");
+    try testing.expect(std.mem.startsWith(u8, w, "global `.kevinrc` (/home/u/.kevinrc) line 1: "));
+    try testing.expect(std.mem.indexOf(u8, w, "outside the home directory") != null);
 }
