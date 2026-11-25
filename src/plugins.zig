@@ -206,13 +206,22 @@ test "the registry directory: override, then XDG, then HOME" {
     defer env.deinit();
     try testing.expect((try dirPath(arena, &env)) == null);
     try env.put("HOME", "/home/u");
-    try testing.expectEqualStrings("/home/u/.config/kevin/plugins", (try dirPath(arena, &env)).?);
+    try testing.expectEqualStrings(
+        try std.fs.path.join(arena, &.{ "/home/u", ".config", "kevin", "plugins" }),
+        (try dirPath(arena, &env)).?,
+    );
     try env.put("XDG_CONFIG_HOME", "/xdg");
-    try testing.expectEqualStrings("/xdg/kevin/plugins", (try dirPath(arena, &env)).?);
+    try testing.expectEqualStrings(
+        try std.fs.path.join(arena, &.{ "/xdg", "kevin", "plugins" }),
+        (try dirPath(arena, &env)).?,
+    );
     try env.put("KEVIN_PLUGIN_DIR", "/custom");
     try testing.expectEqualStrings("/custom", (try dirPath(arena, &env)).?);
     try env.put("KEVIN_PLUGIN_DIR", "");
-    try testing.expectEqualStrings("/xdg/kevin/plugins", (try dirPath(arena, &env)).?);
+    try testing.expectEqualStrings(
+        try std.fs.path.join(arena, &.{ "/xdg", "kevin", "plugins" }),
+        (try dirPath(arena, &env)).?,
+    );
 }
 
 test "the lockfile round-trips and rejects malformed lines" {
