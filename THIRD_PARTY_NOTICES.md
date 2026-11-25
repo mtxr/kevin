@@ -46,3 +46,17 @@ copyright notices, are kept next to the files that derive from them.
   - `inputs/semantics__*.md`: small files written for this suite that exercise
     xc runtime behaviour described in `run/run.go` and the docs.
   - `cases/*.case`: expectations derived from the tests and docs above.
+
+## WebAssembly Micro Runtime (WAMR)
+
+Unlike the projects above, this one is compiled into kevin: it runs the
+sandboxed `.wasm` converter plugins.
+
+- Source: https://github.com/bytecodealliance/wasm-micro-runtime
+- Vendored: version 2.4.3, commit `fd3c104` (2026-11-19), in `vendor/wamr/`.
+- License: Apache-2.0 with LLVM exceptions, Copyright (C) Intel Corporation
+  and contributors. The full text is `vendor/wamr/LICENSE`.
+- Changes: none to the sources; only the files the interpreter needs were
+  copied (the fast interpreter, loader, common runtime, shared utilities,
+  memory allocator and POSIX platform layers). `build.zig` builds them; the
+  `.cmake` files are not used.
