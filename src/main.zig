@@ -97,6 +97,8 @@ const Discovered = struct {
     reasons: []const []const u8,
     excluded: []const []const u8,
     warnings: []const []const u8,
+    /// Plugin bound to each name by `entry -> plugin` (empty: none).
+    plugins: []const ?[]const u8 = &.{},
 };
 
 /// Disk access for the global `.kevinrc`: entries are relative to `root` (the home directory).
@@ -161,6 +163,7 @@ fn loadGlobal(arena: std.mem.Allocator, io: Io, environ: *const std.process.Envi
             .default => 0,
         } },
         .rel = f.path,
+        .plugin = f.plugin,
     });
     return .{ .seeds = seeds.items, .warnings = warnings.items };
 }
@@ -175,6 +178,7 @@ fn discoverFiles(arena: std.mem.Allocator, io: Io, environ: *const std.process.E
     var names: std.ArrayList([]const u8) = .empty;
     var reasons: std.ArrayList([]const u8) = .empty;
     var excluded: std.ArrayList([]const u8) = .empty;
+    var plugin_of: std.ArrayList(?[]const u8) = .empty;
     var warnings: std.ArrayList([]const u8) = .empty;
     try warnings.appendSlice(arena, global.warnings);
     if (text == null and global.seeds.len == 0) {
@@ -194,6 +198,7 @@ fn discoverFiles(arena: std.mem.Allocator, io: Io, environ: *const std.process.E
     try warnings.appendSlice(arena, res.warnings);
     for (res.files) |f| {
         try names.append(arena, f.path);
+        try plugin_of.append(arena, f.plugin);
         try reasons.append(arena, switch (f.origin) {
             .default => "default",
             .include => |line| try std.fmt.allocPrint(arena, ".kevinrc line {d}", .{line}),
@@ -201,7 +206,7 @@ fn discoverFiles(arena: std.mem.Allocator, io: Io, environ: *const std.process.E
         });
     }
     for (res.excluded) |e| try excluded.append(arena, try std.fmt.allocPrint(arena, "{s} (.kevinrc line {d})", .{ e.path, e.line }));
-    return .{ .names = names.items, .reasons = reasons.items, .excluded = excluded.items, .warnings = warnings.items };
+    return .{ .names = names.items, .reasons = reasons.items, .excluded = excluded.items, .warnings = warnings.items, .plugins = plugin_of.items };
 }
 
 pub fn main(init: std.process.Init) !u8 {
@@ -300,6 +305,7 @@ pub fn main(init: std.process.Init) !u8 {
     var names: []const []const u8 = undefined;
     var reasons: []const []const u8 = &.{};
     var excluded_files: []const []const u8 = &.{};
+    var bound_plugins: []const ?[]const u8 = &.{};
     var warnings: std.ArrayList([]const u8) = .empty;
     if (file_args.items.len > 0) {
         // -f means exactly these files; .kevinrc is ignored.
@@ -313,6 +319,7 @@ pub fn main(init: std.process.Init) !u8 {
         names = d.names;
         reasons = d.reasons;
         excluded_files = d.excluded;
+        bound_plugins = d.plugins;
         try warnings.appendSlice(arena, d.warnings);
     }
 
@@ -320,12 +327,24 @@ pub fn main(init: std.process.Init) !u8 {
     root.* = .{ .name = "" };
     var sources: std.ArrayList([]const u8) = .empty;
 
-    for (names) |name| {
+    for (names, 0..) |name, idx| {
         const abs = Io.Dir.cwd().realPathFileAlloc(io, name, arena) catch |err|
             return fail("cannot open '{s}': {t}", .{ name, err });
         const src = Io.Dir.cwd().readFileAlloc(io, abs, arena, .limited(max_file_size)) catch |err|
             return fail("cannot read '{s}': {t}", .{ name, err });
-        const parsed = try parser.parseSource(arena, abs, src);
+        var md: []const u8 = src;
+        if (idx < bound_plugins.len) if (bound_plugins[idx]) |plugin| {
+            // The plugin's output is parsed in memory, as if `abs` were Markdown.
+            const result = convert(arena, io, init.environ_map, plugin, name, src) catch |err| switch (err) {
+                error.Reported => return 2,
+                error.OutOfMemory => return error.OutOfMemory,
+            };
+            for (result.notes) |n| try warnings.append(arena, try std.fmt.allocPrint(arena, "{s} ({s}): {s}", .{ name, plugin, n }));
+            md = result.output;
+        };
+        const parsed = try parser.parseSource(arena, abs, md);
+        if (md.ptr != src.ptr and parsed.root.children.items.len == 0)
+            return fail("plugin '{s}' produced no commands for '{s}'", .{ bound_plugins[idx].?, name });
         try warnings.appendSlice(arena, parsed.warnings.items);
         try ast.merge(arena, root, parsed.root, &warnings);
         try sources.append(arena, abs);
@@ -608,6 +627,54 @@ fn loadRegistered(
 /// `kevin --from mask|xc [-f input.md] [-o output.md]`: converts a foreign
 /// file to kevin syntax. Writes to stdout unless `-o` is given; never
 /// overwrites an existing file.
+/// Converts `text` (the content of `path`) with the converter `from`: a
+/// built-in name, a registered plugin or a `.wasm` file. Failures are
+/// reported on stderr and returned as `error.Reported`.
+fn convert(
+    arena: std.mem.Allocator,
+    io: Io,
+    env: *const std.process.Environ.Map,
+    from: []const u8,
+    path: []const u8,
+    text: []const u8,
+) error{ Reported, OutOfMemory }!migrate.Result {
+    const is_file = std.mem.endsWith(u8, from, ".wasm");
+    if (!is_file) if (migrate.find(from)) |cv| {
+        return cv.run(arena, text) catch |err| switch (err) {
+            error.NoTasksSection => {
+                _ = fail("'{s}' has no 'Tasks' heading (xc needs one; see https://xcfile.dev)", .{path});
+                return error.Reported;
+            },
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+    };
+    const wasm_bytes = if (!is_file) try loadRegistered(arena, io, env, from) else Io.Dir.cwd().readFileAlloc(io, from, arena, .limited(max_plugin_size)) catch |err| {
+        _ = fail("cannot read plugin '{s}': {t}", .{ from, err });
+        return error.Reported;
+    };
+    var diag: wasm.Diagnostic = .{};
+    const out = wasm.run(arena, wasm_bytes, text, &.{ if (is_file) std.fs.path.basename(from) else from, "--path", path }, .{}, &diag) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => {
+            _ = fail("plugin '{s}' failed: {s}", .{ from, diag.message });
+            return error.Reported;
+        },
+    };
+    if (out.exit_code != 0) {
+        const msg = std.mem.trim(u8, out.stderr, " \t\r\n");
+        _ = fail("plugin '{s}' exited with code {d}{s}{s}", .{ from, out.exit_code, if (msg.len > 0) ": " else "", msg });
+        return error.Reported;
+    }
+    // Whatever the plugin wrote to stderr is a note for a human.
+    var notes: std.ArrayList([]const u8) = .empty;
+    var lines = std.mem.splitScalar(u8, out.stderr, '\n');
+    while (lines.next()) |l| {
+        const t = std.mem.trim(u8, l, " \t\r");
+        if (t.len > 0) try notes.append(arena, t);
+    }
+    return .{ .output = out.stdout, .notes = notes.items };
+}
+
 fn runMigration(
     arena: std.mem.Allocator,
     io: Io,
@@ -620,39 +687,15 @@ fn runMigration(
     // then a plugin registered with --plugin-add.
     const is_file = std.mem.endsWith(u8, from, ".wasm");
     const converter = if (is_file) null else migrate.find(from);
-    const registered = !is_file and converter == null and plugins.validName(from);
-    if (!is_file and converter == null and !registered)
+    if (!is_file and converter == null and !plugins.validName(from))
         return fail("unknown source '{s}' for --from (expected 'mask', 'xc', a registered plugin or a .wasm file)", .{from});
     const path = file_arg orelse if (converter) |cv| cv.default_file else return fail("--from {s} needs the file to convert: add -f <file>", .{from});
     const text = Io.Dir.cwd().readFileAlloc(io, path, arena, .limited(max_file_size)) catch |err|
         return fail("cannot read '{s}': {t}", .{ path, err });
 
-    const result = if (converter) |cv| cv.run(arena, text) catch |err| switch (err) {
-        error.NoTasksSection => return fail("'{s}' has no 'Tasks' heading (xc needs one; see https://xcfile.dev)", .{path}),
-        error.OutOfMemory => return err,
-    } else blk: {
-        const wasm_bytes = if (registered) (loadRegistered(arena, io, env, from) catch |err| switch (err) {
-            error.Reported => return 2,
-            error.OutOfMemory => return error.OutOfMemory,
-        }) else Io.Dir.cwd().readFileAlloc(io, from, arena, .limited(max_plugin_size)) catch |err|
-            return fail("cannot read plugin '{s}': {t}", .{ from, err });
-        var diag: wasm.Diagnostic = .{};
-        const out = wasm.run(arena, wasm_bytes, text, &.{ if (is_file) std.fs.path.basename(from) else from, "--path", path }, .{}, &diag) catch |err| switch (err) {
-            error.OutOfMemory => return err,
-            else => return fail("plugin '{s}' failed: {s}", .{ from, diag.message }),
-        };
-        if (out.exit_code != 0) {
-            const msg = std.mem.trim(u8, out.stderr, " \t\r\n");
-            return fail("plugin '{s}' exited with code {d}{s}{s}", .{ from, out.exit_code, if (msg.len > 0) ": " else "", msg });
-        }
-        // Whatever the plugin wrote to stderr is a note for a human.
-        var notes: std.ArrayList([]const u8) = .empty;
-        var lines = std.mem.splitScalar(u8, out.stderr, '\n');
-        while (lines.next()) |l| {
-            const t = std.mem.trim(u8, l, " \t\r");
-            if (t.len > 0) try notes.append(arena, t);
-        }
-        break :blk migrate.Result{ .output = out.stdout, .notes = notes.items };
+    const result = convert(arena, io, env, from, path, text) catch |err| switch (err) {
+        error.Reported => return 2,
+        error.OutOfMemory => return error.OutOfMemory,
     };
 
     if (output_arg) |out_path| {

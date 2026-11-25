@@ -7,8 +7,9 @@ that anyone can write, in any language that compiles to WebAssembly, and run
 with `kevin --from ./plugin.wasm -f <input>`.
 
 > **Status: experimental.** What is described under [How it works](#how-it-works),
-> [Try it](#try-it-in-two-minutes), [Writing a plugin](#writing-a-plugin) and
-> [Testing](#testing) exists and is tested. [Publishing](#publishing) and
+> [Try it](#try-it-in-two-minutes), [Writing a plugin](#writing-a-plugin),
+> [Testing](#testing), [Registering a plugin](#registering-a-plugin) and
+> [Running straight from the source file](#running-straight-from-the-source-file) exists and is tested. [Publishing](#publishing) and
 > [Not yet](#not-yet) are plans or known gaps, and are labelled as such.
 
 ## How it works
@@ -219,6 +220,27 @@ existing name needs `--plugin-remove` first.
 The flags are `--plugin-*`, not a `kevin plugin ...` command, so they can never
 shadow a task of that name in your Markdown.
 
+## Running straight from the source file
+
+Bind a file to a registered plugin in `.kevinrc` and its tasks run without
+converting by hand:
+
+```text
+# .kevinrc
+todo.txt -> lines
+```
+
+```sh
+kevin             # lists the commands, including those from todo.txt
+kevin hello       # runs it
+```
+
+Each run converts in memory (nothing is written), merges the result with your
+Markdown files (later files win), and treats notes as warnings. Plugin failure,
+or output without a single command, stops kevin with an error. `kevin --explain`
+shows `todo.txt` as a source. The same review advice applies: the generated
+commands are what runs.
+
 ## Publishing
 
 > **Planned, not implemented.** Today, publishing means handing someone the
@@ -252,8 +274,8 @@ Known gaps, in rough order of when they are likely to be addressed:
 - **Reading other files.** A plugin only sees its stdin. Formats that include
   other files (`import` in a `justfile`) need a read-only window onto the
   project directory. Anything outside the project root will stay rejected.
-- **The manifest, `plugin install`, the lockfile and `.kevinrc` integration**
-  described under Publishing.
+- **The manifest, `plugin install` and the lockfile** described under
+  Publishing.
 - **Validating the output.** kevin does not yet parse a plugin's stdout before
   printing it; a plugin can emit text that is not valid kevin Markdown.
 - **Per-run limits are not configurable** from the command line.

@@ -81,6 +81,13 @@ $bin --plugin-add examples/plugins/lines/lines.wasm >/dev/null || { echo "smoke:
 [ "$($bin --plugin-list | cut -d' ' -f1)" = "lines" ] || { echo "smoke: --plugin-list does not show the plugin"; exit 1; }
 printf 'greet: echo hi\n' > "$tmp/reg.txt"
 $bin --from lines -f "$tmp/reg.txt" 2>/dev/null | grep -q '^## > greet$' || { echo "smoke: --from <registered plugin> failed"; exit 1; }
+# `file -> plugin` in .kevinrc runs the task straight from the foreign file.
+PWD_BIN=$PWD/$bin
+mkdir -p "$tmp/rcplugin" && cp "$tmp/reg.txt" "$tmp/rcplugin/todo.txt"
+printf 'todo.txt -> lines\n' > "$tmp/rcplugin/.kevinrc"
+[ "$(cd "$tmp/rcplugin" && KEVIN_GLOBAL_RC= "$PWD_BIN" greet 2>/dev/null)" = "hi" ] || { echo "smoke: .kevinrc 'file -> plugin' did not run the task"; exit 1; }
+printf 'todo.txt -> nosuch\n' > "$tmp/rcplugin/.kevinrc"
+(cd "$tmp/rcplugin" && KEVIN_GLOBAL_RC= "$PWD_BIN" greet >/dev/null 2>&1) && { echo "smoke: an unknown plugin in .kevinrc was ignored"; exit 1; }
 printf 'x' >> "$KEVIN_PLUGIN_DIR/lines.wasm"
 $bin --from lines -f "$tmp/reg.txt" >/dev/null 2>&1 && { echo "smoke: a modified plugin was run"; exit 1; }
 $bin --plugin-remove lines || { echo "smoke: --plugin-remove failed"; exit 1; }
