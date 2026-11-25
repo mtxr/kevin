@@ -70,6 +70,25 @@ $bin --from xc -f examples/xc.md -o "$tmp/xc.md" 2>/dev/null
 [ "$($bin -f "$tmp/xc.md" greet Joe)" = "Hello, Joe." ] || { echo "smoke: xc inputs failed"; exit 1; }
 [ "$($bin -f "$tmp/xc.md" both)" = "$(printf 'hi\nboth')" ] || { echo "smoke: xc requires failed"; exit 1; }
 $bin --from xc -f examples/maskfile.md -o "$tmp/none.md" 2>/dev/null && { echo "smoke: xc without Tasks accepted"; exit 1; }
+# A .wasm plugin converts inside the sandbox: stdin in, stdout out, its exit code is an error.
+printf 'hi\n' > "$tmp/plugin-in.txt"
+[ "$($bin --from src/testdata/echo.wasm -f "$tmp/plugin-in.txt" 2>/dev/null)" = "$(printf 'echo:HI')" ] || { echo "smoke: wasm plugin output mismatch"; exit 1; }
+: > "$tmp/plugin-empty.txt"
+$bin --from src/testdata/echo.wasm -f "$tmp/plugin-empty.txt" 2>/dev/null && { echo "smoke: wasm plugin failure ignored"; exit 1; }
+# Registered plugins: added by name, checked against their sha256, refused when changed.
+export KEVIN_PLUGIN_DIR="$tmp/plugins"
+$bin --plugin-add examples/plugins/lines/lines.wasm >/dev/null || { echo "smoke: --plugin-add failed"; exit 1; }
+[ "$($bin --plugin-list | cut -d' ' -f1)" = "lines" ] || { echo "smoke: --plugin-list does not show the plugin"; exit 1; }
+printf 'greet: echo hi\n' > "$tmp/reg.txt"
+$bin --from lines -f "$tmp/reg.txt" 2>/dev/null | grep -q '^## > greet$' || { echo "smoke: --from <registered plugin> failed"; exit 1; }
+printf 'x' >> "$KEVIN_PLUGIN_DIR/lines.wasm"
+$bin --from lines -f "$tmp/reg.txt" >/dev/null 2>&1 && { echo "smoke: a modified plugin was run"; exit 1; }
+$bin --plugin-remove lines || { echo "smoke: --plugin-remove failed"; exit 1; }
+unset KEVIN_PLUGIN_DIR
+# The example plugin uses memory.copy/fill (bulk memory), which compilers emit by default.
+printf 'greet: echo hi from a plugin\n' > "$tmp/lines.txt"
+$bin --from examples/plugins/lines/lines.wasm -f "$tmp/lines.txt" -o "$tmp/lines.md" 2>/dev/null
+[ "$($bin -f "$tmp/lines.md" greet)" = "hi from a plugin" ] || { echo "smoke: example plugin output does not run"; exit 1; }
 
 # Dependencies: order, once-per-run, async, arguments, failure and cycles.
 [ "$($bin -f examples/deps.md ordered)" = "$(printf 'setup\nstep 1\nstep 2\nordered')" ] || { echo "smoke: sync requires failed"; exit 1; }
