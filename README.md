@@ -209,7 +209,8 @@ Syntax, one entry per line (UTF-8, CRLF accepted, BOM ignored):
   directory segment, absolute paths and any `..` segment (entries must stay
   inside the current directory). There is no `?`, `[...]` or escaping;
 - `entry -> plugin` (`package.json -> npm`) binds a file that is not Markdown
-  to a registered [converter plugin](PLUGINS.md) (or `mask` / `xc`). kevin
+  to a registered [converter plugin](PLUGINS.md) (or `mask` / `xc`; PLUGINS.md
+  also covers installing, writing and publishing plugins). kevin
   runs the plugin on the file every time, in memory, and merges the result
   with the other files; nothing is written to disk. A plugin that fails or
   produces no commands is an error. It cannot be combined with `!`.
