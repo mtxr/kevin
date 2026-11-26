@@ -15,6 +15,65 @@ mise use -g github:mtxr/kevin                                                  #
 > Status: early (0.x). The syntax and flags may still change between minor
 > versions; see [Known limitations](#known-limitations).
 
+## What it looks like
+
+You write your tasks as Markdown, the way you would document them:
+
+````md
+# Acme API
+
+## > test
+> Run the unit tests
+
+```sh
+echo "running tests"
+```
+
+## > deploy (env) [region]
+> Ship the current build
+
+Requires: test
+
+**OPTIONS**
+* dry_run
+    * flags: -n --dry-run
+    * type: boolean
+    * desc: Print what would happen
+
+```sh
+echo "deploying to $env (region: ${region:-us-east-1})${dry_run:+ [dry run]}"
+```
+````
+
+and kevin turns it into a CLI:
+
+```text
+$ kevin
+Commands:
+  test                   Run the unit tests
+  deploy <env> [region]  Ship the current build
+
+$ kevin deploy staging --dry-run
+running tests
+deploying to staging (region: us-east-1) [dry run]
+```
+
+How each piece of the Markdown is read:
+
+| In the Markdown | In the CLI |
+|---|---|
+| `## > deploy` | the command `kevin deploy` (any heading level; nesting makes subcommands) |
+| `(env)` and `[region]` after the name | a required and an optional argument |
+| `>` lines under the heading | the description shown in `kevin --help` |
+| an `**OPTIONS**` list | flags, typed and validated before anything runs |
+| `Requires: test` | runs `test` first (synchronously or in parallel, once per run) |
+| the code block | the script: shell, Node/Bun, TypeScript, Python, Ruby, Lua, PHP or PowerShell |
+
+Because it is just Markdown, GitHub already renders it for your readers, and
+nothing can drift between the docs and the commands. Before running anything you
+can ask what would happen (`kevin --explain deploy`), and tools and coding agents
+can read the whole command tree as JSON (`kevin --introspect`).
+
 ## Why kevin
 
 - **Docs and commands in one file.** What people read is what runs, so it
@@ -32,8 +91,8 @@ mise use -g github:mtxr/kevin                                                  #
 - **Any format, through plugins.** Sandboxed WebAssembly converters turn other
   files into tasks, e.g. the scripts of a `package.json`
   ([plugins](#plugins)). No network, no filesystem, no processes.
-- **One binary**, no runtime dependencies (about 1 MB on macOS; the Linux
-  builds are larger today).
+- **One small binary**, no runtime dependencies: about 1 MB (0.7 MB on Apple
+  silicon, 1.1 MB on Linux x86_64).
 
 ### How it compares
 
