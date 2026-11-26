@@ -75,6 +75,11 @@ printf 'hi\n' > "$tmp/plugin-in.txt"
 [ "$($bin --from src/testdata/echo.wasm -f "$tmp/plugin-in.txt" 2>/dev/null)" = "$(printf 'echo:HI')" ] || { echo "smoke: wasm plugin output mismatch"; exit 1; }
 : > "$tmp/plugin-empty.txt"
 $bin --from src/testdata/echo.wasm -f "$tmp/plugin-empty.txt" 2>/dev/null && { echo "smoke: wasm plugin failure ignored"; exit 1; }
+# SIMD modules load (JavaScript plugins built with Javy always use it), and a plugin that
+# traps after writing on stderr still gets its message shown.
+printf 'HAL' > "$tmp/simd-in.txt"
+[ "$($bin --from src/testdata/simd.wasm -f "$tmp/simd-in.txt" 2>/dev/null)" = "IBM" ] || { echo "smoke: SIMD plugin failed"; exit 1; }
+$bin --from src/testdata/trap.wasm -f "$tmp/simd-in.txt" 2>&1 | grep -q 'no usable script' || { echo "smoke: trap lost the plugin's stderr"; exit 1; }
 # Registered plugins: added by name, checked against their sha256, refused when changed.
 export KEVIN_PLUGIN_DIR="$tmp/plugins"
 $bin --plugin-add examples/plugins/lines/lines.wasm >/dev/null || { echo "smoke: --plugin-add failed"; exit 1; }

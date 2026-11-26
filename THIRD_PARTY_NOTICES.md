@@ -60,3 +60,15 @@ sandboxed `.wasm` converter plugins.
   copied (the fast interpreter, loader, common runtime, shared utilities,
   memory allocator and POSIX platform layers). `build.zig` builds them; the
   `.cmake` files are not used.
+
+## SIMD Everywhere (simde)
+
+Compiled into kevin together with WAMR: it lets the interpreter execute
+WebAssembly SIMD instructions, which plugins written in JavaScript always use.
+
+- Source: https://github.com/simd-everywhere/simde
+- Vendored: version 0.8.2 (commit `71fd833`), in `vendor/simde/`.
+- License: MIT, Copyright (c) 2017 Evan Nemerson and contributors. The full
+  text is `vendor/simde/COPYING`.
+- Changes: none. Only the 12 headers that `simde/wasm/simd128.h` includes were
+  copied.

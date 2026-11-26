@@ -134,16 +134,25 @@ larger example of generated output.
 ### Other languages
 
 Any language that produces a WASI command works in principle, as long as it
-uses only the imports above. **These have not been tried against kevin yet**,
-so treat them as starting points, not as instructions:
+uses only the imports above. **Rust has not been tried against kevin yet**,
+so treat it as a starting point, not as instructions; JavaScript has:
 
 - **Rust**: `rustup target add wasm32-wasip1`, then `cargo build --release
   --target wasm32-wasip1` on a normal `fn main()` that reads
   `std::io::stdin()` and prints.
-- **JavaScript**: bundle with `esbuild` and compile to a WASI module with
-  [Javy](https://github.com/bytecodealliance/javy) (QuickJS inside the module).
-  There is no Node API in it: no `fs`, no `process`, no `require`; `JSON.parse`
-  works.
+- **JavaScript**: compile with [Javy](https://github.com/bytecodealliance/javy)
+  (QuickJS inside the module). It works, and
+  [`kevin-plugin-node`](https://github.com/mtxr/kevin-plugin-node) is a complete
+  example. What to know:
+  - Build with `javy build -J javy-stream-io=y -J text-encoding=y -o plugin.wasm plugin.js`
+    and read stdin and write stdout with `Javy.IO.readSync(fd, bytes)` and
+    `Javy.IO.writeSync(fd, bytes)`. `console.log` goes to stdout and
+    `console.error` to stderr.
+  - There is no Node API: no `fs`, no `process`, no `require`; `JSON.parse` works.
+  - A JavaScript plugin cannot choose an exit code: an uncaught exception ends
+    the module with a trap. Write the reason on stderr first; kevin shows it
+    (`plugin '...' failed: <stderr> (Exception: unreachable)`).
+  - The module uses WebAssembly SIMD, which kevin's runtime supports.
 
 If a toolchain's standard library calls a function that is not in the list
 above, the plugin fails at that call and the error names the function. That is
