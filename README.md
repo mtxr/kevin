@@ -7,6 +7,11 @@ from the document. A small, dependency-free alternative to `make` and `just`
 for project tasks, in the family of [mask](https://github.com/jacobdeichert/mask)
 and [xc](https://github.com/joerdav/xc), written in Zig.
 
+```sh
+curl -fsSL https://raw.githubusercontent.com/mtxr/kevin/main/install.sh | sh   # macOS, Linux
+mise use -g github:mtxr/kevin                                                  # or with mise
+```
+
 > Status: early (0.x). The syntax and flags may still change between minor
 > versions; see [Known limitations](#known-limitations).
 
@@ -24,7 +29,11 @@ and [xc](https://github.com/joerdav/xc), written in Zig.
 - **Easy to inspect.** `kevin --explain <cmd>` shows what would run without
   running it, and `kevin --introspect` prints the command tree as JSON.
 - **Migration.** `kevin --from mask|xc` converts existing files.
-- **One small binary**, no runtime dependencies (about 0.7 MB).
+- **Any format, through plugins.** Sandboxed WebAssembly converters turn other
+  files into tasks, e.g. the scripts of a `package.json`
+  ([plugins](#plugins)). No network, no filesystem, no processes.
+- **One binary**, no runtime dependencies (about 1 MB on macOS; the Linux
+  builds are larger today).
 
 ### How it compares
 
@@ -80,32 +89,56 @@ coding agent? See [docs/for-agents.md](docs/for-agents.md).
 
 ## Install
 
-macOS and Linux:
+| How | Command |
+|---|---|
+| Install script (macOS, Linux) | `curl -fsSL https://raw.githubusercontent.com/mtxr/kevin/main/install.sh \| sh` |
+| [mise](https://mise.jdx.dev) | `mise use -g github:mtxr/kevin` |
+| By hand | download an archive from the [latest release](https://github.com/mtxr/kevin/releases/latest) |
+| From source | `zig build` ([below](#from-source)) |
+
+Check it worked, and turn on tab completion:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mtxr/kevin/main/install.sh | sh
+kevin --version
+eval "$(kevin --completion zsh)"      # or bash, or fish
 ```
 
-It picks the archive for your system from the
-[latest release](https://github.com/mtxr/kevin/releases/latest), verifies its
-checksum and installs `kevin` into `~/.local/bin` (set `KEVIN_INSTALL_DIR` to
-change it, or `KEVIN_VERSION=v0.1.0` to pin a version).
+The script picks the archive for your system, verifies its checksum and
+installs `kevin` into `~/.local/bin` (set `KEVIN_INSTALL_DIR` to change it, or
+`KEVIN_VERSION=v0.3.0` to pin a version).
 
 Windows: download `kevin-<version>-x86_64-windows.zip` from the
 [releases page](https://github.com/mtxr/kevin/releases/latest), extract it and
 put `kevin.exe` on your `PATH`. Every release also has a `SHA256SUMS` file and
 the other archives (`aarch64-macos`, `x86_64-macos`, `x86_64-linux`,
-`aarch64-linux`) if you prefer to download by hand.
+`aarch64-linux`) if you prefer to download by hand. Plugins (below) are not
+available on Windows yet.
 
 The binaries are not code-signed. If macOS refuses to open one downloaded with
 a browser, run `xattr -d com.apple.quarantine kevin` once (the installer does
-not need it). Package managers are not available yet.
+not need it). Homebrew and other package managers are not available yet; mise
+works because it downloads the release archive.
 
 ### Updating
 
 `kevin --check-update` tells you whether a newer release exists (it only asks
-GitHub, using `curl`; nothing is downloaded). To update, run the install command
-again.
+GitHub, using `curl`; nothing is downloaded). To update, run the install script
+again, or `mise upgrade github:mtxr/kevin`.
+
+### Plugins
+
+Plugins turn other files into kevin tasks. To use the `scripts` of a
+`package.json` (needs kevin 0.4.0 or newer):
+
+```sh
+kevin --plugin-install mtxr/kevin-plugin-node
+echo 'package.json -> node' >> .kevinrc
+kevin                    # the scripts are now tasks
+```
+
+Each plugin is a single `.wasm` file from a GitHub release. kevin checks its
+sha256 and runs it in a sandbox. See [PLUGINS.md](PLUGINS.md) to install,
+write or publish one.
 
 ### From source
 

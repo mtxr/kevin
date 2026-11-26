@@ -338,6 +338,7 @@ pub fn printRootHelp(arena: Allocator, w: *Io.Writer, root: *const Command, sour
         .{ .left = "    --from <mask|xc|PLUGIN.wasm>", .right = "Convert a foreign file to kevin syntax (stdout, or -o)" },
         .{ .left = "-o, --output <PATH>", .right = "With --from: write the result to a new file" },
         .{ .left = "    --plugin-add <FILE.wasm>", .right = "Register a converter plugin on this machine (records its sha256)" },
+        .{ .left = "    --plugin-install <OWNER/REPO[@TAG]>", .right = "Download a plugin from a GitHub release (repo kevin-plugin-<name>), verify its sha256, register it" },
         .{ .left = "    --plugin-list", .right = "List registered plugins" },
         .{ .left = "    --plugin-remove <NAME>", .right = "Unregister a plugin" },
         .{ .left = "-j, --jobs <N>", .right = "Max scripts running at once (default: CPU count, or $KEVIN_JOBS)" },

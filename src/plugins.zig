@@ -2,13 +2,15 @@
 //! machine, stored by name next to a lockfile with their sha256.
 //!
 //!     <dir>/<name>.wasm
-//!     <dir>/plugins.lock        one `<name> <sha256 hex>` per line
+//!     <dir>/plugins.lock        one `<name> <sha256 hex> [<source>]` per line
 //!
 //! `<dir>` is `$KEVIN_PLUGIN_DIR`, else `$XDG_CONFIG_HOME/kevin/plugins`,
 //! else `~/.config/kevin/plugins`. Nothing here touches the network: a plugin
-//! gets in only when the user hands kevin a file (`--plugin-add`), and it is
-//! checked against its recorded hash every time it is loaded, so a file that
-//! changed on disk afterwards is refused rather than run.
+//! gets in only as bytes the caller hands over (a file with `--plugin-add`, a
+//! download checked by `install.zig`), and it is checked against its recorded
+//! hash every time it is loaded, so a file that changed on disk afterwards is
+//! refused rather than run. `<source>` (`owner/repo[@tag]`) says where an
+//! installed plugin came from; it is informational and never trusted.
 
 const std = @import("std");
 const Io = std.Io;
@@ -23,6 +25,8 @@ pub const Entry = struct {
     name: []const u8,
     /// Lowercase hex sha256 of the `.wasm` file.
     hash: []const u8,
+    /// Where it was installed from (`owner/repo[@tag]`); null for `--plugin-add`.
+    source: ?[]const u8 = null,
 };
 
 pub const Error = error{
@@ -57,6 +61,15 @@ pub fn nameFromPath(path: []const u8) ?[]const u8 {
     return if (validName(stem)) stem else null;
 }
 
+/// A `source` is one token of `[A-Za-z0-9._@/+-]`, so the lock stays one line.
+fn validSource(source: []const u8) bool {
+    if (source.len == 0 or source.len > 200) return false;
+    for (source) |ch| {
+        if (!(std.ascii.isAlphanumeric(ch) or std.mem.indexOfScalar(u8, "._@/+-", ch) != null)) return false;
+    }
+    return true;
+}
+
 pub fn sha256Hex(bytes: []const u8) [64]u8 {
     var digest: [Sha256.digest_length]u8 = undefined;
     Sha256.hash(bytes, &digest, .{});
@@ -82,17 +95,23 @@ pub fn parseLock(arena: Allocator, text: []const u8) (Error || Allocator.Error)!
         var parts = std.mem.tokenizeAny(u8, line, " \t");
         const name = parts.next() orelse return error.CorruptLock;
         const hash = parts.next() orelse return error.CorruptLock;
+        const source = parts.next();
         if (parts.next() != null or !validName(name) or hash.len != 64) return error.CorruptLock;
+        if (source) |src| if (!validSource(src)) return error.CorruptLock;
         for (hash) |ch| if (!std.ascii.isHex(ch)) return error.CorruptLock;
-        try out.append(arena, .{ .name = name, .hash = try std.ascii.allocLowerString(arena, hash) });
+        try out.append(arena, .{ .name = name, .hash = try std.ascii.allocLowerString(arena, hash), .source = source });
     }
     return out.items;
 }
 
 pub fn formatLock(arena: Allocator, entries: []const Entry) Allocator.Error![]const u8 {
     var out: std.ArrayList(u8) = .empty;
-    try out.appendSlice(arena, "# Written by kevin: plugin name and the sha256 of its .wasm.\n");
-    for (entries) |e| try out.print(arena, "{s} {s}\n", .{ e.name, e.hash });
+    try out.appendSlice(arena, "# Written by kevin: plugin name, the sha256 of its .wasm and, if installed, its source.\n");
+    for (entries) |e| {
+        try out.print(arena, "{s} {s}", .{ e.name, e.hash });
+        if (e.source) |src| try out.print(arena, " {s}", .{src});
+        try out.append(arena, '\n');
+    }
     return out.items;
 }
 
@@ -135,6 +154,16 @@ pub fn add(arena: Allocator, io: Io, dir: []const u8, src_path: []const u8) !Add
         error.StreamTooLong => return error.TooLarge,
         else => return err,
     };
+    return addBytes(arena, io, dir, name, bytes, null);
+}
+
+/// Registers `bytes` as the plugin `name`. `source` records where they came
+/// from. The same bytes again are not an error; different bytes under a taken
+/// name are (`error.AlreadyRegistered`).
+pub fn addBytes(arena: Allocator, io: Io, dir: []const u8, name: []const u8, bytes: []const u8, source: ?[]const u8) !Added {
+    if (!validName(name)) return error.InvalidName;
+    if (source) |src| if (!validSource(src)) return error.InvalidName;
+    if (bytes.len > max_size) return error.TooLarge;
     if (!std.mem.startsWith(u8, bytes, wasm_magic)) return error.NotWasm;
     const hash = try arena.dupe(u8, &sha256Hex(bytes));
 
@@ -146,7 +175,7 @@ pub fn add(arena: Allocator, io: Io, dir: []const u8, src_path: []const u8) !Add
 
     try Io.Dir.cwd().createDirPath(io, dir);
     try Io.Dir.cwd().writeFile(io, .{ .sub_path = try wasmPath(arena, dir, name), .data = bytes });
-    const entry: Entry = .{ .name = name, .hash = hash };
+    const entry: Entry = .{ .name = name, .hash = hash, .source = if (source) |src| try arena.dupe(u8, src) else null };
     var all: std.ArrayList(Entry) = .empty;
     try all.appendSlice(arena, current);
     try all.append(arena, entry);
@@ -284,4 +313,28 @@ test "only WebAssembly files can be added" {
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "text.wasm", .data = "hello" });
     try testing.expectError(error.NotWasm, add(arena, testing.io, base, try std.fs.path.join(arena, &.{ base, "text.wasm" })));
     try testing.expectError(error.InvalidName, add(arena, testing.io, base, "Bad Name.wasm"));
+}
+
+test "an installed plugin remembers where it came from" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base = try std.fmt.allocPrint(arena, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    const reg = try std.fs.path.join(arena, &.{ base, "registry" });
+    const module = "\x00asm\x01\x00\x00\x00";
+
+    const added = try addBytes(arena, testing.io, reg, "demo", module, "me/kevin-plugin-demo@v1.2.0");
+    try testing.expect(added.new);
+    const entries = try readLock(arena, testing.io, reg);
+    try testing.expectEqualStrings("me/kevin-plugin-demo@v1.2.0", entries[0].source.?);
+    try testing.expectEqualStrings(module, try load(arena, testing.io, reg, "demo"));
+
+    // A lock line with a source that is not one safe token is corrupt.
+    const h = sha256Hex("x");
+    try testing.expectError(error.CorruptLock, parseLock(arena, try std.fmt.allocPrint(arena, "demo {s} a;b\n", .{h})));
+    try testing.expectError(error.CorruptLock, parseLock(arena, try std.fmt.allocPrint(arena, "demo {s} a b\n", .{h})));
+    try testing.expectError(error.InvalidName, addBytes(arena, testing.io, reg, "demo2", module, "a b"));
+    try testing.expectError(error.NotWasm, addBytes(arena, testing.io, reg, "demo3", "nope", null));
 }

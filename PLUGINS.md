@@ -214,55 +214,64 @@ exiting with a code makes `--from` fail.
 
 ## Installing a plugin
 
-kevin does not download plugins (see [Planned](#planned)). Installing one is
-three steps, all of them yours. The example is
-[`kevin-plugin-node`](https://github.com/mtxr/kevin-plugin-node), which turns
-the `scripts` of a `package.json` into tasks:
-
 ```sh
-# 1. Download the .wasm from the plugin's latest release.
-curl -LO https://github.com/mtxr/kevin-plugin-node/releases/latest/download/node.wasm
-curl -LO https://github.com/mtxr/kevin-plugin-node/releases/latest/download/node.wasm.sha256
-
-# 2. Check it. The checksum file is written by the release workflow; a plugin
-#    that signs its builds can also be verified against the repository it was
-#    built in (needs the GitHub CLI).
-shasum -a 256 -c node.wasm.sha256            # sha256sum -c on most Linux
-gh attestation verify node.wasm --repo mtxr/kevin-plugin-node
-
-# 3. Register it on this machine (copies it in, records its sha256).
-kevin --plugin-add node.wasm
+kevin --plugin-install mtxr/kevin-plugin-node            # the latest release
+kevin --plugin-install mtxr/kevin-plugin-node@v0.1.0     # a specific one
+kevin --plugin-list                                      # name, hash and where it came from
 ```
 
-Then use it, either once with `kevin --from node -f package.json`, or bound to
-the file in a `.kevinrc` so its tasks are always there:
+`--plugin-install owner/repo[@tag]` downloads the release's `<name>.wasm` and
+`<name>.wasm.sha256` (the repository must be named `kevin-plugin-<name>`),
+checks the hash, and registers the plugin as `--plugin-add` would, remembering
+the repository it came from. Then use it once with `kevin --from node -f
+package.json`, or bind it to the file in a `.kevinrc` so its tasks are always
+there:
 
 ```sh
 echo 'package.json -> node' >> .kevinrc
 kevin
 ```
 
-What to know before you do:
+How it is kept safe:
 
+- Only those two files are fetched, from `github.com` over https (GitHub serves
+  release files from its own CDN, so https redirects are followed), at most 5
+  redirects, 60 seconds and 8 MiB. It needs `curl`.
+- A release **without** a `.sha256` is refused, and so is a download that does
+  not match it. Nothing is installed in either case.
+- The checksum guards the transfer. What you trust is the repository that
+  published the release, as with any download, so install plugins from authors
+  you would trust with a script.
 - A plugin is sandboxed (see [The sandbox](#the-sandbox)): it cannot touch your
   network, files or processes. But the commands it generates are what kevin
   runs, so read `kevin --from node -f package.json` once, the way you would read
   a `maskfile.md` you did not write. `kevin --explain <task>` shows what a task
   would run without running it.
-- A plugin whose release has no checksum, or that you cannot trace to a
-  repository you trust, is a file from a stranger: verify what you can and
-  prefer pinning a version.
 - Plugins that use WebAssembly SIMD (every JavaScript plugin built with Javy)
-  need a kevin newer than 0.2.0. An older one says `v128 value type requires
-  simd feature`.
+  need kevin 0.3.0 or newer. An older one says `v128 value type requires simd
+  feature`.
 - A `.kevinrc` that names a plugin only works on machines where it is
-  registered: a teammate who clones the repository repeats the three steps
+  registered: a teammate who clones the repository runs `--plugin-install` too
   (a shared lockfile is [planned](#planned)).
+
+### By hand
+
+Without `--plugin-install` (no `curl`, a plugin that is not on GitHub, or you
+want to check the provenance first), the same thing takes three steps:
+
+```sh
+curl -LO https://github.com/mtxr/kevin-plugin-node/releases/latest/download/node.wasm
+curl -LO https://github.com/mtxr/kevin-plugin-node/releases/latest/download/node.wasm.sha256
+shasum -a 256 -c node.wasm.sha256            # sha256sum -c on most Linux
+gh attestation verify node.wasm --repo mtxr/kevin-plugin-node   # if the author signs builds
+kevin --plugin-add node.wasm
+```
 
 ## Registering a plugin
 
-A plugin you use regularly can be registered on this machine and then named
-instead of pointed at:
+A plugin you have as a file (one you built, or downloaded by hand) is registered
+with `--plugin-add`; `--plugin-install` ends up in the same registry. Registered
+plugins are named instead of pointed at:
 
 ```sh
 kevin --plugin-add ./lines.wasm          # copies it in and records its sha256
@@ -274,10 +283,11 @@ kevin --plugin-remove lines
 The name is the file name without `.wasm` (lowercase letters, digits, `-` and
 `_`). Plugins live in `$KEVIN_PLUGIN_DIR`, else `$XDG_CONFIG_HOME/kevin/plugins`,
 else `~/.config/kevin/plugins`, next to a `plugins.lock` with one
-`<name> <sha256>` per line. Every use re-checks the hash: if the file changed
+`<name> <sha256> [<source>]` per line (the source, `owner/repo[@tag]`, is only
+there for plugins installed from GitHub). Every use re-checks the hash: if the file changed
 since you added it, kevin refuses to run it and tells you how to re-add it
-deliberately. Adding never downloads anything, and a different file under an
-existing name needs `--plugin-remove` first.
+deliberately. `--plugin-add` never downloads anything, and a different file
+under an existing name needs `--plugin-remove` first, for both commands.
 
 The flags are `--plugin-*`, not a `kevin plugin ...` command, so they can never
 shadow a task of that name in your Markdown.
@@ -312,8 +322,8 @@ Nothing needs to go through this repository.
 
 | Asset | Why |
 |---|---|
-| `<name>.wasm` | The plugin. The file name, without `.wasm`, is the name users register and put in `.kevinrc`: lowercase letters, digits, `-` and `_`. Keep it the same in every release, so `releases/latest/download/<name>.wasm` always works. |
-| `<name>.wasm.sha256` | `shasum -a 256 <name>.wasm > <name>.wasm.sha256`, so users can check the download. |
+| `<name>.wasm` | The plugin. The file name, without `.wasm`, is the name users register and put in `.kevinrc`: lowercase letters, digits, `-` and `_`. Keep it the same in every release, so `releases/latest/download/<name>.wasm` always works. **Required** by `--plugin-install`. |
+| `<name>.wasm.sha256` | `shasum -a 256 <name>.wasm > <name>.wasm.sha256`. **Required**: `--plugin-install` refuses a release without it. |
 | A build provenance attestation (recommended) | `actions/attest-build-provenance` on the file, so `gh attestation verify` can tie it to your repository and workflow. |
 
 One `.wasm` runs on every operating system and CPU kevin supports, so there are
@@ -321,7 +331,8 @@ no per-platform files. It must be at most 8 MiB.
 
 ### Conventions
 
-- Name the repository `kevin-plugin-<name>` and give it **both** GitHub topics,
+- Name the repository `kevin-plugin-<name>` (`--plugin-install` derives the
+  asset name from it) and give it **both** GitHub topics,
   `kevin-plugin` and `kevin-runner` (`gh repo edit --add-topic kevin-plugin
   --add-topic kevin-runner`). Today those topics are the only way plugins are
   found: <https://github.com/topics/kevin-plugin>. A repository with only one
@@ -330,8 +341,8 @@ no per-platform files. It must be at most 8 MiB.
   release-please from Conventional Commits, as `kevin-plugin-node` does. Say in the README which kevin version is the
   minimum (a plugin built with Javy needs the SIMD support that came after
   0.2.0).
-- The README says: what the plugin converts, the three install commands from
-  [Installing a plugin](#installing-a-plugin), and what it does with input it
+- The README says: what the plugin converts, the install command
+  (`kevin --plugin-install owner/repo`), and what it does with input it
   does not understand (notes on stderr, an exit code, a message on stderr
   before a trap).
 
@@ -366,20 +377,16 @@ independent of the language.
 ## Planned
 
 > **Not implemented.** These are the next steps, in the order they are likely
-> to land. Until then, [installing](#installing-a-plugin) is manual.
+> to land.
 
-1. `kevin --plugin-install <owner>/<repo>[@version]`: downloads the release's
-   `.wasm` and its checksum from GitHub over HTTPS (that host only), verifies
-   it and registers it, recording where it came from. A flag, not a
-   `kevin plugin` command, so it cannot shadow a task of that name.
-2. A project lockfile: `package.json -> node@0.1.0` in `.kevinrc` plus a
+1. A project lockfile: `package.json -> node@0.1.0` in `.kevinrc` plus a
    committed file with the repository and sha256, so `kevin --plugin-install`
    with no arguments gives every teammate the same plugin.
-3. A manifest the release carries (a `kevin-plugin.json`: name, version, the
+2. A manifest the release carries (a `kevin-plugin.json`: name, version, the
    files it understands, the minimum kevin version), so kevin can suggest the
    `.kevinrc` line after installing and refuse a plugin that needs a newer
    kevin.
-4. A curated index (a file in this repository where adding a plugin is a pull
+3. A curated index (a file in this repository where adding a plugin is a pull
    request) and, if there is demand, `--plugin-search`.
 
 Native code is never downloaded: only `.wasm`, which kevin validates and runs
@@ -394,7 +401,7 @@ Known gaps, in rough order of when they are likely to be addressed:
 - **Reading other files.** A plugin only sees its stdin. Formats that include
   other files (`import` in a `justfile`) need a read-only window onto the
   project directory. Anything outside the project root will stay rejected.
-- **Installing from GitHub, the manifest and the lockfile** described under
+- **The manifest and the project lockfile** described under
   [Planned](#planned).
 - **Validating the output.** kevin does not yet parse a plugin's stdout before
   printing it; a plugin can emit text that is not valid kevin Markdown.
