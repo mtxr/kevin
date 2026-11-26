@@ -15,6 +15,7 @@ const update = @import("update.zig");
 const kevinrc = @import("kevinrc.zig");
 const wasm = @import("wasm.zig");
 const plugins = @import("plugins.zig");
+const install = @import("install.zig");
 const build_options = @import("build_options");
 
 test {
@@ -32,6 +33,7 @@ test {
     _ = kevinrc;
     _ = wasm;
     _ = plugins;
+    _ = install;
 }
 
 const default_files = [_][]const u8{ "readme.md", "tasks.md", "build.md" };
@@ -265,6 +267,10 @@ pub fn main(init: std.process.Init) !u8 {
             jobs_arg = a["--jobs=".len..];
         } else if (std.mem.eql(u8, a, "--plugin-list")) {
             return pluginList(arena, io, init.environ_map);
+        } else if (std.mem.eql(u8, a, "--plugin-install")) {
+            i += 1;
+            if (i >= argv.len) return fail("--plugin-install requires owner/repo[@tag] (a repository named {s}<name>)", .{install.repo_prefix});
+            return pluginInstall(arena, io, init.environ_map, argv[i]);
         } else if (std.mem.eql(u8, a, "--plugin-add") or std.mem.eql(u8, a, "--plugin-remove")) {
             i += 1;
             if (i >= argv.len) return fail("{s} requires {s}", .{ a, if (a[9] == 'a') "a .wasm file" else "a plugin name" });
@@ -567,6 +573,41 @@ fn pluginAdd(arena: std.mem.Allocator, io: Io, env: *const std.process.Environ.M
     return 0;
 }
 
+fn pluginInstall(arena: std.mem.Allocator, io: Io, env: *const std.process.Environ.Map, text: []const u8) !u8 {
+    const spec = install.parseSpec(text) catch |err| switch (err) {
+        error.InvalidSpec => return fail("'{s}' is not owner/repo or owner/repo@tag", .{text}),
+        error.NotAPluginRepo => return fail("'{s}': a plugin repository is named {s}<name> (lowercase letters, digits, - and _)", .{ text, install.repo_prefix }),
+    };
+    const dir = (try pluginDir(arena, env)) orelse return fail(noPluginDir, .{});
+    const added = install.install(arena, io, dir, spec, install.curlFetch) catch |err| switch (err) {
+        error.ChecksumMissing => return fail("the release of {s}/{s} has no {s}.wasm.sha256 (or the release or tag does not exist); a download that cannot be verified is not installed", .{ spec.owner, spec.repo, spec.name }),
+        error.BadChecksumFile => return fail("{s}.wasm.sha256 is not a SHA-256 hash; nothing was installed", .{spec.name}),
+        error.ChecksumMismatch => return fail("the download does not match {s}.wasm.sha256; nothing was installed", .{spec.name}),
+        error.PluginMissing => return fail("the release of {s}/{s} has no {s}.wasm (a plugin release carries <name>.wasm and <name>.wasm.sha256)", .{ spec.owner, spec.repo, spec.name }),
+        error.TooLarge => return fail("the plugin is larger than {d} MiB", .{plugins.max_size / (1024 * 1024)}),
+        error.Unavailable => return fail("could not download (is curl installed, and are you online?)", .{}),
+        error.NotWasm => return fail("{s}.wasm is not a WebAssembly module", .{spec.name}),
+        error.AlreadyRegistered => return fail("a different plugin is already registered as '{s}'; run --plugin-remove {s} first", .{ spec.name, spec.name }),
+        error.CorruptLock => return fail("{s}/{s} is corrupt; fix or delete it", .{ dir, plugins.lock_name }),
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return fail("cannot install '{s}': {t}", .{ text, err }),
+    };
+    var buf: [1024]u8 = undefined;
+    var w = Io.File.stdout().writer(io, &buf);
+    try w.interface.print("{s} {s} from {s} (sha256 {s})\n", .{
+        if (added.new) "installed" else "already installed:",
+        added.entry.name,
+        added.entry.source orelse text,
+        added.entry.hash,
+    });
+    if (added.new) try w.interface.print(
+        "Read what it generates before you run it: kevin --from {s} -f <file>\nUse it from a file:        echo '<file> -> {s}' >> .kevinrc\n",
+        .{ added.entry.name, added.entry.name },
+    );
+    try w.interface.flush();
+    return 0;
+}
+
 fn pluginRemove(arena: std.mem.Allocator, io: Io, env: *const std.process.Environ.Map, name: []const u8) !u8 {
     const dir = (try pluginDir(arena, env)) orelse return fail(noPluginDir, .{});
     plugins.remove(arena, io, dir, name) catch |err| switch (err) {
@@ -587,7 +628,11 @@ fn pluginList(arena: std.mem.Allocator, io: Io, env: *const std.process.Environ.
     };
     var buf: [1024]u8 = undefined;
     var w = Io.File.stdout().writer(io, &buf);
-    for (entries) |e| try w.interface.print("{s}  {s}\n", .{ e.name, e.hash[0..12] });
+    for (entries) |e| {
+        try w.interface.print("{s}  {s}", .{ e.name, e.hash[0..12] });
+        if (e.source) |src| try w.interface.print("  {s}", .{src});
+        try w.interface.writeByte('\n');
+    }
     try w.interface.flush();
     return 0;
 }

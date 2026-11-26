@@ -59,9 +59,9 @@ const fish_script =
     \\
 ;
 
-const global_flags = [_][]const u8{ "--file", "--from", "--output", "--jobs", "--explain", "--introspect", "--completion", "--plugin-add", "--plugin-list", "--plugin-remove", "--version", "--help" };
+const global_flags = [_][]const u8{ "--file", "--from", "--output", "--jobs", "--explain", "--introspect", "--completion", "--plugin-add", "--plugin-install", "--plugin-list", "--plugin-remove", "--version", "--help" };
 /// Global flags that consume the next word.
-const global_with_value = [_][]const u8{ "-f", "--file", "-o", "--output", "-j", "--jobs", "--from", "--completion", "--plugin-add", "--plugin-remove" };
+const global_with_value = [_][]const u8{ "-f", "--file", "-o", "--output", "-j", "--jobs", "--from", "--completion", "--plugin-add", "--plugin-install", "--plugin-remove" };
 
 fn isGlobalWithValue(t: []const u8) bool {
     for (global_with_value) |g| if (std.mem.eql(u8, g, t)) return true;

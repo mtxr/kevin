@@ -80,6 +80,10 @@ $bin --from src/testdata/echo.wasm -f "$tmp/plugin-empty.txt" 2>/dev/null && { e
 printf 'HAL' > "$tmp/simd-in.txt"
 [ "$($bin --from src/testdata/simd.wasm -f "$tmp/simd-in.txt" 2>/dev/null)" = "IBM" ] || { echo "smoke: SIMD plugin failed"; exit 1; }
 $bin --from src/testdata/trap.wasm -f "$tmp/simd-in.txt" 2>&1 | grep -q 'no usable script' || { echo "smoke: trap lost the plugin's stderr"; exit 1; }
+# --plugin-install validates what it is given before it touches the network.
+$bin --plugin-install 'not a repo' 2>/dev/null && { echo "smoke: --plugin-install accepted a bad spec"; exit 1; }
+$bin --plugin-install mtxr/kevin 2>&1 | grep -q 'kevin-plugin-<name>' || { echo "smoke: --plugin-install accepted a non-plugin repo"; exit 1; }
+$bin --plugin-install 'mtxr/kevin-plugin-x@../y' 2>/dev/null && { echo "smoke: --plugin-install accepted a path in the tag"; exit 1; }
 # Registered plugins: added by name, checked against their sha256, refused when changed.
 export KEVIN_PLUGIN_DIR="$tmp/plugins"
 $bin --plugin-add examples/plugins/lines/lines.wasm >/dev/null || { echo "smoke: --plugin-add failed"; exit 1; }
