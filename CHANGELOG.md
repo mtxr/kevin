@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/mtxr/kevin/compare/v0.2.0...v0.3.0) (2026-11-26)
+
+
+### Features
+
+* **kevinrc:** add a global ~/.kevinrc ([#11](https://github.com/mtxr/kevin/issues/11)) ([e58dce0](https://github.com/mtxr/kevin/commit/e58dce05746699fcb41ded39c3e45101de6fb84c))
+* **plugins:** sandboxed WebAssembly converter plugins ([#13](https://github.com/mtxr/kevin/issues/13)) ([283c93f](https://github.com/mtxr/kevin/commit/283c93f244e012815f5e8c720ec53d8b5af12b37))
+* **wasm:** run SIMD modules so JavaScript plugins load ([#14](https://github.com/mtxr/kevin/issues/14)) ([ef0d036](https://github.com/mtxr/kevin/commit/ef0d0366b0c5733e420d9e9d13c6a99bbb4e6f9e))
+
+
+### Documentation
+
+* **plugins:** how to install, write and publish a plugin ([#15](https://github.com/mtxr/kevin/issues/15)) ([89cf853](https://github.com/mtxr/kevin/commit/89cf853d2b777b480b4a6c7df78d22428779723a))
+
 ## [0.2.0](https://github.com/mtxr/kevin/compare/v0.1.0...v0.2.0) (2026-11-23)
 
 
