@@ -121,6 +121,11 @@ fn addWamr(
         "-DWASM_ENABLE_BULK_MEMORY_OPT=1",
         "-DWASM_ENABLE_REF_TYPES=1",
         "-DWASM_ENABLE_INSTRUCTION_METERING=1",
+        // WebAssembly SIMD, executed by the fast interpreter through simde
+        // (vendor/simde). Compilers that embed an engine, such as Javy for
+        // JavaScript, emit SIMD, so without it their plugins cannot load.
+        "-DWASM_ENABLE_SIMD=1",
+        "-DWASM_ENABLE_SIMDE=1",
         // Software bounds checks: no SIGSEGV handler (kevin owns signals, see
         // proc.zig) and no multi-GiB address-space reservation per memory.
         "-DWASM_DISABLE_HW_BOUND_CHECK=1",
@@ -145,10 +150,11 @@ fn addWamr(
     module.link_libc = true;
     module.addCSourceFiles(.{ .root = b.path("vendor/wamr"), .files = sources.items, .flags = all_flags.items });
     // The calling-convention trampoline: invokeNative_general.c only works on
-    // 32-bit targets (it passes every argument as uint32), so use the assembly.
+    // 32-bit targets (it passes every argument as uint32), so use the assembly,
+    // and the variant that knows about v128 (the plain one crashes once SIMD is on).
     const trampoline = switch (target.result.cpu.arch) {
-        .aarch64 => "core/iwasm/common/arch/invokeNative_aarch64.s",
-        else => "core/iwasm/common/arch/invokeNative_em64.s",
+        .aarch64 => "core/iwasm/common/arch/invokeNative_aarch64_simd.s",
+        else => "core/iwasm/common/arch/invokeNative_em64_simd.s",
     };
     module.addCSourceFiles(.{
         .root = b.path("vendor/wamr"),
@@ -166,6 +172,7 @@ fn addWamr(
         "vendor/wamr/core/shared/mem-alloc/ems",
     };
     for (includes) |inc| module.addIncludePath(b.path(inc));
+    module.addIncludePath(b.path("vendor/simde"));
     module.addIncludePath(b.path(b.fmt("vendor/wamr/core/shared/platform/{s}", .{platform})));
     module.addIncludePath(b.path("vendor/wamr/core/shared/platform/include"));
     if (os == .macos) module.addIncludePath(b.path("build/shims"));

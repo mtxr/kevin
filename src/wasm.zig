@@ -55,6 +55,9 @@ pub const Error = error{
 /// Human readable reason for the last `Error`; owned by the arena given to `run`.
 pub const Diagnostic = struct {
     message: []const u8 = "",
+    /// What the plugin wrote on stderr before it failed. Languages that cannot
+    /// exit with a code (a JavaScript plugin throwing) explain themselves here.
+    stderr: []const u8 = "",
 };
 
 const Errno = enum(i32) {
@@ -142,6 +145,7 @@ pub fn run(
         const exc: [*c]const u8 = c.wasm_runtime_get_exception(inst);
         const reason = if (exc != null) std.mem.span(exc) else "trap";
         diag.message = try arena.dupe(u8, if (ctx.over_limit) "the plugin produced too much output" else reason);
+        diag.stderr = ctx.stderr.items;
         return error.Trap;
     }
     return .{
@@ -419,4 +423,23 @@ test "the plugin sees exactly the arguments it was given, and an empty environme
     var diag: Diagnostic = .{};
     const out = try run(arena_state.allocator(), args_wasm, "", &.{ "plugin", "--path", "pkg/package.json" }, .{}, &diag);
     try testing.expectEqualStrings("plugin\n--path\npkg/package.json\nenv=0\n", out.stdout);
+}
+
+test "a module that uses SIMD loads and runs" {
+    if (!supported) return error.SkipZigTest;
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    var diag: Diagnostic = .{};
+    // `src/testdata/simd.zig` adds one to each byte with a 128-bit vector.
+    const out = try run(arena_state.allocator(), @embedFile("testdata/simd.wasm"), "HAL", &.{"simd"}, .{}, &diag);
+    try testing.expectEqualStrings("IBM", out.stdout);
+}
+
+test "a trap keeps what the plugin said on stderr" {
+    if (!supported) return error.SkipZigTest;
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    var diag: Diagnostic = .{};
+    try testing.expectError(error.Trap, run(arena_state.allocator(), @embedFile("testdata/trap.wasm"), "", &.{"trap"}, .{}, &diag));
+    try testing.expectEqualStrings("no usable script\n", diag.stderr);
 }

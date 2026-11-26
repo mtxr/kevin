@@ -656,7 +656,12 @@ fn convert(
     const out = wasm.run(arena, wasm_bytes, text, &.{ if (is_file) std.fs.path.basename(from) else from, "--path", path }, .{}, &diag) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => {
-            _ = fail("plugin '{s}' failed: {s}", .{ from, diag.message });
+            const said = std.mem.trim(u8, diag.stderr, " \t\r\n");
+            if (said.len > 0) {
+                _ = fail("plugin '{s}' failed: {s} ({s})", .{ from, said, diag.message });
+            } else {
+                _ = fail("plugin '{s}' failed: {s}", .{ from, diag.message });
+            }
             return error.Reported;
         },
     };
