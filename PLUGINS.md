@@ -321,10 +321,13 @@ no per-platform files. It must be at most 8 MiB.
 
 ### Conventions
 
-- Name the repository `kevin-plugin-<name>` and give it the GitHub topic
-  `kevin-converter`. Today that topic is the only way plugins are found:
-  <https://github.com/topics/kevin-converter>.
-- Version with tags (`v0.1.0`). Say in the README which kevin version is the
+- Name the repository `kevin-plugin-<name>` and give it **both** GitHub topics,
+  `kevin-plugin` and `kevin-runner` (`gh repo edit --add-topic kevin-plugin
+  --add-topic kevin-runner`). Today those topics are the only way plugins are
+  found: <https://github.com/topics/kevin-plugin>. A repository with only one
+  of them is not listed as a kevin plugin.
+- Version with tags (`v0.1.0`), ideally created by a release tool such as
+  release-please from Conventional Commits, as `kevin-plugin-node` does. Say in the README which kevin version is the
   minimum (a plugin built with Javy needs the SIMD support that came after
   0.2.0).
 - The README says: what the plugin converts, the three install commands from
