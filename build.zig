@@ -5,6 +5,10 @@ const manifest = @import("build.zig.zon");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    // Release builds carry no debug info: it was 81% of the Linux binary and
+    // added a 3.6 MB .pdb on Windows. Runtime safety checks stay on. Pass
+    // -Dstrip=false to keep symbols when debugging a release build.
+    const strip = b.option(bool, "strip", "Strip debug info and symbols (default: on outside Debug builds)") orelse (optimize != .debug);
 
     const options = b.addOptions();
     options.addOption([]const u8, "version", manifest.version);
@@ -15,6 +19,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .strip = strip,
             .imports = &.{.{ .name = "build_options", .module = options.createModule() }},
         }),
     });

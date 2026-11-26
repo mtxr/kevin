@@ -15,6 +15,99 @@ mise use -g github:mtxr/kevin                                                  #
 > Status: early (0.x). The syntax and flags may still change between minor
 > versions; see [Known limitations](#known-limitations).
 
+## What it looks like
+
+You write your tasks as Markdown, the way you would document them:
+
+````md
+# Acme API
+
+## > test
+> Run the unit tests
+
+```sh
+echo "running tests"
+```
+
+## > deploy (env) [region]
+> Ship the current build
+
+Requires: test
+
+**OPTIONS**
+* dry_run
+    * flags: -n --dry-run
+    * type: boolean
+    * desc: Print what would happen
+
+```sh
+echo "deploying to $env (region: ${region:-us-east-1})${dry_run:+ [dry run]}"
+```
+````
+
+and kevin turns it into a CLI:
+
+```text
+$ kevin
+Commands:
+  test                   Run the unit tests
+  deploy <env> [region]  Ship the current build
+
+$ kevin deploy staging --dry-run
+running tests
+deploying to staging (region: us-east-1) [dry run]
+```
+
+How each piece of the Markdown is read:
+
+| In the Markdown | In the CLI |
+|---|---|
+| `## > deploy` | the command `kevin deploy` (any heading level; nesting makes subcommands) |
+| `(env)` and `[region]` after the name | a required and an optional argument |
+| `>` lines under the heading | the description shown in `kevin --help` |
+| an `**OPTIONS**` list | flags, typed and validated before anything runs |
+| `Requires: test` | runs `test` first (synchronously or in parallel, once per run) |
+| the code block | the script: shell, Node/Bun, TypeScript, Python, Ruby, Lua, PHP or PowerShell |
+
+Because it is just Markdown, GitHub already renders it for your readers, and
+nothing can drift between the docs and the commands. Before running anything you
+can ask what would happen (`kevin --explain deploy`), and tools and coding agents
+can read the whole command tree as JSON (`kevin --introspect`).
+
+## Extend it with plugins
+
+kevin reads Markdown, but a **plugin** can teach it to read any other file.
+A plugin is a single WebAssembly file from a GitHub release; it runs in a
+sandbox with no network, no filesystem and no processes, and it can be written
+in any language that compiles to WebAssembly. The first one is
+[`kevin-plugin-node`](https://github.com/mtxr/kevin-plugin-node) (itself written
+in JavaScript): it turns the `scripts` of a `package.json` into kevin tasks.
+
+```sh
+kevin --plugin-install mtxr/kevin-plugin-node    # once per machine
+echo 'package.json -> node' >> .kevinrc          # in each project that wants it
+```
+
+```text
+$ kevin
+Commands:
+  dev    vite
+  build  vite build
+  test   vitest run
+  lint   eslint .
+```
+
+`kevin build` runs `npm run build` (or pnpm, yarn or bun, when the
+`packageManager` field of the `package.json` says so). Nothing is written to
+disk: kevin converts the file in memory on every run and merges the result with
+the tasks from your Markdown, so `package.json` stays the source of truth.
+
+`--plugin-install` needs kevin 0.4.0 or newer and `curl`; it checks the
+download against the release's sha256 before registering it. Read what a plugin
+generates once before you rely on it (`kevin --from node -f package.json`): the
+sandbox protects the conversion, but the commands it produces are what runs.
+To install, write or publish your own, see [PLUGINS.md](PLUGINS.md).
+
 ## Why kevin
 
 - **Docs and commands in one file.** What people read is what runs, so it
@@ -31,9 +124,10 @@ mise use -g github:mtxr/kevin                                                  #
 - **Migration.** `kevin --from mask|xc` converts existing files.
 - **Any format, through plugins.** Sandboxed WebAssembly converters turn other
   files into tasks, e.g. the scripts of a `package.json`
-  ([plugins](#plugins)). No network, no filesystem, no processes.
-- **One binary**, no runtime dependencies (about 1 MB on macOS; the Linux
-  builds are larger today).
+  ([plugins](#extend-it-with-plugins)). No network, no filesystem, no
+  processes.
+- **One small binary**, no runtime dependencies: about 1 MB (0.7 MB on Apple
+  silicon, 1.1 MB on Linux x86_64).
 
 ### How it compares
 
@@ -127,18 +221,8 @@ again, or `mise upgrade github:mtxr/kevin`.
 
 ### Plugins
 
-Plugins turn other files into kevin tasks. To use the `scripts` of a
-`package.json` (needs kevin 0.4.0 or newer):
-
-```sh
-kevin --plugin-install mtxr/kevin-plugin-node
-echo 'package.json -> node' >> .kevinrc
-kevin                    # the scripts are now tasks
-```
-
-Each plugin is a single `.wasm` file from a GitHub release. kevin checks its
-sha256 and runs it in a sandbox. See [PLUGINS.md](PLUGINS.md) to install,
-write or publish one.
+To read other files as tasks (a `package.json`, for a start), install a plugin:
+see [Extend it with plugins](#extend-it-with-plugins).
 
 ### From source
 
