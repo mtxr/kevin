@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/mtxr/kevin/compare/v0.3.0...v0.4.0) (2026-11-26)
+
+
+### Features
+
+* **plugins:** install a plugin from a GitHub release ([#16](https://github.com/mtxr/kevin/issues/16)) ([dbfd2fe](https://github.com/mtxr/kevin/commit/dbfd2fe88539c7e50bf2cda029042592cc800a24))
+
+
+### Performance
+
+* **build:** ship release binaries without debug info ([#18](https://github.com/mtxr/kevin/issues/18)) ([118de1f](https://github.com/mtxr/kevin/commit/118de1f10cda3d8390240e6c0032c449d4370ee6))
+
 ## [0.3.0](https://github.com/mtxr/kevin/compare/v0.2.0...v0.3.0) (2026-11-26)
 
 
