@@ -6,11 +6,17 @@ are built in; for any other format a converter can be a **WebAssembly plugin**
 that anyone can write, in any language that compiles to WebAssembly, and run
 with `kevin --from ./plugin.wasm -f <input>`.
 
-> **Status: experimental.** What is described under [How it works](#how-it-works),
-> [Try it](#try-it-in-two-minutes), [Writing a plugin](#writing-a-plugin),
-> [Testing](#testing), [Registering a plugin](#registering-a-plugin) and
-> [Running straight from the source file](#running-straight-from-the-source-file) exists and is tested. [Publishing](#publishing) and
-> [Not yet](#not-yet) are plans or known gaps, and are labelled as such.
+> **Status: experimental.** Everything described below exists and is tested,
+> except what is under [Planned](#planned) and [Not yet](#not-yet), which are
+> labelled as plans or known gaps.
+
+**Where to start**
+
+| You want to | Read |
+|---|---|
+| Use a plugin someone published | [Installing a plugin](#installing-a-plugin), then [Running straight from the source file](#running-straight-from-the-source-file) |
+| Write a plugin | [How it works](#how-it-works), [Writing a plugin](#writing-a-plugin), [Testing](#testing) |
+| Publish your plugin for others | [Offering your plugin](#offering-your-plugin) |
 
 ## How it works
 
@@ -206,6 +212,53 @@ exiting with a code makes `--from` fail.
 | An error naming an exception such as `instruction limit exceeded` | The plugin ran out of its instruction budget, usually an endless loop. |
 | `no WebAssembly runtime` | This build of kevin lacks the runtime (see [Not yet](#not-yet)). |
 
+## Installing a plugin
+
+kevin does not download plugins (see [Planned](#planned)). Installing one is
+three steps, all of them yours. The example is
+[`kevin-plugin-node`](https://github.com/mtxr/kevin-plugin-node), which turns
+the `scripts` of a `package.json` into tasks:
+
+```sh
+# 1. Download the .wasm from the plugin's latest release.
+curl -LO https://github.com/mtxr/kevin-plugin-node/releases/latest/download/node.wasm
+curl -LO https://github.com/mtxr/kevin-plugin-node/releases/latest/download/node.wasm.sha256
+
+# 2. Check it. The checksum file is written by the release workflow; a plugin
+#    that signs its builds can also be verified against the repository it was
+#    built in (needs the GitHub CLI).
+shasum -a 256 -c node.wasm.sha256            # sha256sum -c on most Linux
+gh attestation verify node.wasm --repo mtxr/kevin-plugin-node
+
+# 3. Register it on this machine (copies it in, records its sha256).
+kevin --plugin-add node.wasm
+```
+
+Then use it, either once with `kevin --from node -f package.json`, or bound to
+the file in a `.kevinrc` so its tasks are always there:
+
+```sh
+echo 'package.json -> node' >> .kevinrc
+kevin
+```
+
+What to know before you do:
+
+- A plugin is sandboxed (see [The sandbox](#the-sandbox)): it cannot touch your
+  network, files or processes. But the commands it generates are what kevin
+  runs, so read `kevin --from node -f package.json` once, the way you would read
+  a `maskfile.md` you did not write. `kevin --explain <task>` shows what a task
+  would run without running it.
+- A plugin whose release has no checksum, or that you cannot trace to a
+  repository you trust, is a file from a stranger: verify what you can and
+  prefer pinning a version.
+- Plugins that use WebAssembly SIMD (every JavaScript plugin built with Javy)
+  need a kevin newer than 0.2.0. An older one says `v128 value type requires
+  simd feature`.
+- A `.kevinrc` that names a plugin only works on machines where it is
+  registered: a teammate who clones the repository repeats the three steps
+  (a shared lockfile is [planned](#planned)).
+
 ## Registering a plugin
 
 A plugin you use regularly can be registered on this machine and then named
@@ -250,26 +303,81 @@ or output without a single command, stops kevin with an error. `kevin --explain`
 shows `todo.txt` as a source. The same review advice applies: the generated
 commands are what runs.
 
-## Publishing
+## Offering your plugin
 
-> **Planned, not implemented.** Today, publishing means handing someone the
-> `.wasm` file. They run it with `--from ./path/to/plugin.wasm`, after reading
-> this page's sandbox section. Nothing is downloaded or installed by kevin.
+Publishing a plugin is publishing a GitHub release with a `.wasm` file in it.
+Nothing needs to go through this repository.
 
-The intended path, so that plugins can live and evolve without going through
-this repository:
+### What a release contains
 
-1. A plugin is a repository that publishes a `.wasm` file with each release (a
-   single file runs on every operating system and CPU).
-2. `kevin plugin install <owner>/<repo>[@version]` downloads that file into the
-   user's configuration directory and records its sha256 in a lockfile, so a
-   later change to the release is noticed.
-3. Discovery starts as a GitHub topic (`kevin-converter`). A registry, an index
-   file in a repository where adding a plugin is a pull request, comes later if
-   there is demand.
-4. A manifest the plugin describes itself with (the files it understands, such
-   as `package.json`, so `.kevinrc` can map globs like `packages/*/package.json`
-   to it, and whether it needs to read sibling files).
+| Asset | Why |
+|---|---|
+| `<name>.wasm` | The plugin. The file name, without `.wasm`, is the name users register and put in `.kevinrc`: lowercase letters, digits, `-` and `_`. Keep it the same in every release, so `releases/latest/download/<name>.wasm` always works. |
+| `<name>.wasm.sha256` | `shasum -a 256 <name>.wasm > <name>.wasm.sha256`, so users can check the download. |
+| A build provenance attestation (recommended) | `actions/attest-build-provenance` on the file, so `gh attestation verify` can tie it to your repository and workflow. |
+
+One `.wasm` runs on every operating system and CPU kevin supports, so there are
+no per-platform files. It must be at most 8 MiB.
+
+### Conventions
+
+- Name the repository `kevin-plugin-<name>` and give it the GitHub topic
+  `kevin-converter`. Today that topic is the only way plugins are found:
+  <https://github.com/topics/kevin-converter>.
+- Version with tags (`v0.1.0`). Say in the README which kevin version is the
+  minimum (a plugin built with Javy needs the SIMD support that came after
+  0.2.0).
+- The README says: what the plugin converts, the three install commands from
+  [Installing a plugin](#installing-a-plugin), and what it does with input it
+  does not understand (notes on stderr, an exit code, a message on stderr
+  before a trap).
+
+### Checklist before a release
+
+1. It builds to a module that exports `_start` and imports only the functions
+   in [Writing a plugin](#writing-a-plugin).
+2. `kevin --from ./<name>.wasm -f <input>` prints Markdown that `kevin -f out.md`
+   lists and runs. Run the `.wasm`, not only the native build.
+3. A bad input fails visibly: a non-zero exit code with the reason on stderr
+   (a language that cannot choose an exit code writes the reason first, then
+   fails; kevin shows it).
+4. The same input gives the same output (the clock is frozen and randomness is
+   fixed, so a plugin that depends on either will not behave).
+5. Tests run the module in a real kevin, not only under your language's runtime.
+
+### A release workflow to copy
+
+[`kevin-plugin-node`](https://github.com/mtxr/kevin-plugin-node) is a complete
+example, in JavaScript:
+
+- `ci.yml` runs the unit tests, builds the module and runs it in a kevin built
+  from source (`scripts/e2e.sh`: convert, register, run a task from the source
+  file through `.kevinrc`, check that a failure explains itself).
+- `release.yml` runs on a `v*` tag: it checks the tag against `package.json`,
+  repeats the tests, writes the checksum, attests the build and creates the
+  release with `gh release create`.
+
+Replace the build step (`scripts/build.sh`) with your toolchain; the rest is
+independent of the language.
+
+## Planned
+
+> **Not implemented.** These are the next steps, in the order they are likely
+> to land. Until then, [installing](#installing-a-plugin) is manual.
+
+1. `kevin --plugin-install <owner>/<repo>[@version]`: downloads the release's
+   `.wasm` and its checksum from GitHub over HTTPS (that host only), verifies
+   it and registers it, recording where it came from. A flag, not a
+   `kevin plugin` command, so it cannot shadow a task of that name.
+2. A project lockfile: `package.json -> node@0.1.0` in `.kevinrc` plus a
+   committed file with the repository and sha256, so `kevin --plugin-install`
+   with no arguments gives every teammate the same plugin.
+3. A manifest the release carries (a `kevin-plugin.json`: name, version, the
+   files it understands, the minimum kevin version), so kevin can suggest the
+   `.kevinrc` line after installing and refuse a plugin that needs a newer
+   kevin.
+4. A curated index (a file in this repository where adding a plugin is a pull
+   request) and, if there is demand, `--plugin-search`.
 
 Native code is never downloaded: only `.wasm`, which kevin validates and runs
 in the sandbox above.
@@ -283,8 +391,8 @@ Known gaps, in rough order of when they are likely to be addressed:
 - **Reading other files.** A plugin only sees its stdin. Formats that include
   other files (`import` in a `justfile`) need a read-only window onto the
   project directory. Anything outside the project root will stay rejected.
-- **The manifest, `plugin install` and the lockfile** described under
-  Publishing.
+- **Installing from GitHub, the manifest and the lockfile** described under
+  [Planned](#planned).
 - **Validating the output.** kevin does not yet parse a plugin's stdout before
   printing it; a plugin can emit text that is not valid kevin Markdown.
 - **Per-run limits are not configurable** from the command line.
